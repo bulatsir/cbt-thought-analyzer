@@ -1,0 +1,50 @@
+# Node / Vite
+node_modules/
+dist/
+.vite/
+*.local
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Python (backend)
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
+._*
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build outputs
+build/
+out/
+
+# Secrets that might sneak in
+*.pem
+*.key
+secrets/
+
+# Internal k8s deploy manifests (live in private Gitea, contain internal IPs)
+deploy/
