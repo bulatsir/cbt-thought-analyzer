@@ -8,7 +8,7 @@ CBT Thought Analyzer — десктопное приложение для раз
 - **B** (Beliefs) — автоматические мысли, убеждения
 - **C** (Consequences) — последствия: эмоции и поведение
 
-Приложение помогает пользователю записать свои мысли и автоматически определяет когнитивные искажения с помощью AI (Groq API, Llama 3.1 8B). Запросы идут через собственный FastAPI-бэкенд — ключ Groq хранится на сервере, фронт его не видит.
+Приложение помогает пользователю записать свои мысли и автоматически определяет когнитивные искажения с помощью AI (Llama 3.3 70B через OpenRouter с маршрутизацией на Groq/SambaNova-Turbo). Запросы идут через собственный FastAPI-бэкенд — API-ключ хранится на сервере, фронт его не видит.
 
 ## UX-концепция
 
@@ -90,7 +90,7 @@ CBT Thought Analyzer — десктопное приложение для раз
 
 ### Модель
 
-Llama 3.1 8B через Groq API (быстрый inference).
+`meta-llama/llama-3.3-70b-instruct` через OpenRouter с провайдер-preference `[groq, sambanova-turbo]` и включёнными fallbacks. Среднее время `/analyze` ~1 сек, цена ~$0.00004 за вызов (см. https://openrouter.ai/meta-llama/llama-3.3-70b-instruct). Менять в `backend/app/groq_client.py` (константы `UPSTREAM_URL`, `MODEL` и блок `provider` в body).
 
 ### Подход
 

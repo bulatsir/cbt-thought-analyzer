@@ -24,8 +24,8 @@ from app.schemas import (
 
 logger = logging.getLogger(__name__)
 
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-MODEL = "llama-3.1-8b-instant"
+UPSTREAM_URL = "https://openrouter.ai/api/v1/chat/completions"
+MODEL = "meta-llama/llama-3.3-70b-instruct"
 TIMEOUT_SECONDS = 20.0
 
 
@@ -34,7 +34,11 @@ class GroqClient:
         self._api_key = api_key
         self._client = httpx.AsyncClient(
             timeout=TIMEOUT_SECONDS,
-            headers={"Authorization": f"Bearer {api_key}"},
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "HTTP-Referer": "https://api-abc.bulsir.com",
+                "X-Title": "CBT Thought Analyzer",
+            },
         )
 
     async def close(self) -> None:
@@ -48,7 +52,7 @@ class GroqClient:
     ) -> dict[str, Any]:
         try:
             response = await self._client.post(
-                GROQ_URL,
+                UPSTREAM_URL,
                 json={
                     "model": MODEL,
                     "messages": [
@@ -58,6 +62,7 @@ class GroqClient:
                     "response_format": {"type": "json_object"},
                     "temperature": 0.3,
                     "max_tokens": max_tokens,
+                    "provider": {"order": ["groq", "sambanova-turbo"], "allow_fallbacks": True},
                 },
             )
         except httpx.TimeoutException as e:
