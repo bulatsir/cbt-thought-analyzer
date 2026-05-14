@@ -6,6 +6,7 @@ import httpx
 from fastapi import HTTPException
 
 from app.prompts import (
+    DISTORTIONS,
     build_downward_arrow_system_prompt,
     build_downward_arrow_user_prompt,
     build_socratic_system_prompt,
@@ -21,6 +22,8 @@ from app.schemas import (
     SocraticResponse,
     TechniqueRequest,
 )
+
+_CANONICAL_NAMES = set(DISTORTIONS)
 
 logger = logging.getLogger(__name__)
 
@@ -97,23 +100,37 @@ class GroqClient:
 
     async def analyze(self, req: AnalyzeRequest) -> AnalyzeResponse:
         parsed = await self._call(
-            build_system_prompt(),
+            build_system_prompt(req.language),
             build_user_prompt(req.thought, req.situation, req.emotions),
         )
         raw = parsed.get("distortions", [])
         if not isinstance(raw, list):
             raw = []
         distortions: list[Distortion] = []
+        dropped: list[str] = []
         for item in raw[:3]:
             if not isinstance(item, dict):
                 continue
             name = item.get("name")
             if not isinstance(name, str) or not name.strip():
                 continue
+            name = name.strip()
+            # Hard-filter: name must be from the canonical Russian DISTORTIONS list.
+            # The LLM (especially in EN mode) sometimes returns an English name despite
+            # the system prompt asking for Russian — drop those so iOS mapping works.
+            if name not in _CANONICAL_NAMES:
+                dropped.append(name)
+                continue
             explanation = item.get("explanation") or ""
             if not isinstance(explanation, str):
                 explanation = ""
-            distortions.append(Distortion(name=name.strip(), explanation=explanation))
+            distortions.append(Distortion(name=name, explanation=explanation))
+        if dropped:
+            logger.warning(
+                "analyze dropped non-canonical names (lang=%s): %s",
+                req.language,
+                dropped,
+            )
         return AnalyzeResponse(distortions=distortions)
 
     async def downward_arrow(self, req: TechniqueRequest) -> DownwardArrowResponse:
