@@ -55,7 +55,7 @@ Response:
 }
 ```
 
-Average latency ~1 s, cost ≈ $0.00004 per call.
+`name` is always the canonical Russian key (so clients can keep a single localization map); `explanation` follows the `language` parameter.
 
 ## System prompt
 
