@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from app.prompts import (
     DISTORTIONS,
+    DISTORTIONS_EN,
     build_downward_arrow_system_prompt,
     build_downward_arrow_user_prompt,
     build_socratic_system_prompt,
@@ -24,7 +25,10 @@ from app.schemas import (
     TechniqueRequest,
 )
 
-_CANONICAL_NAMES = set(DISTORTIONS)
+_CANONICAL_NAMES_BY_LANG: dict[str, set[str]] = {
+    "ru": set(DISTORTIONS),
+    "en": set(DISTORTIONS_EN),
+}
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +113,7 @@ class GroqClient:
         raw = parsed.get("distortions", [])
         if not isinstance(raw, list):
             raw = []
+        canonical = _CANONICAL_NAMES_BY_LANG.get(req.language, set(DISTORTIONS))
         distortions: list[Distortion] = []
         dropped: list[str] = []
         for item in raw[:3]:
@@ -118,10 +123,10 @@ class GroqClient:
             if not isinstance(name, str) or not name.strip():
                 continue
             name = name.strip()
-            # Hard-filter: name must be from the canonical Russian DISTORTIONS list.
-            # The LLM (especially in EN mode) sometimes returns an English name despite
-            # the system prompt asking for Russian — drop those so iOS mapping works.
-            if name not in _CANONICAL_NAMES:
+            # Hard-filter: name must be from the canonical list for the requested
+            # language. The model occasionally drifts (e.g. returns Russian name
+            # in EN mode) — drop those so the client gets a clean contract.
+            if name not in canonical:
                 dropped.append(name)
                 continue
             explanation = item.get("explanation") or ""

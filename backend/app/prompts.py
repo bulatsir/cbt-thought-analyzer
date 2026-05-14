@@ -1,5 +1,6 @@
 from app.schemas import Distortion, HistoryStep
 
+# Canonical Russian names — also the keys for storage / sorting / filters.
 DISTORTIONS: tuple[str, ...] = (
     "Чёрно-белое мышление",
     "Сверхобобщение",
@@ -21,24 +22,44 @@ DISTORTIONS: tuple[str, ...] = (
     "Обвинение",
 )
 
+# Parallel English names, same order as DISTORTIONS.
+DISTORTIONS_EN: tuple[str, ...] = (
+    "All-or-Nothing Thinking",
+    "Overgeneralization",
+    "Mental Filter",
+    "Disqualifying the Positive",
+    "Mind Reading",
+    "Fortune Telling",
+    "Catastrophizing",
+    "Minimization",
+    "Emotional Reasoning",
+    "Should Statements",
+    "Labeling",
+    "Personalization",
+    "Tunnel Vision",
+    "Perfectionism",
+    "Comparison",
+    "Fairness Fallacy",
+    "Control Fallacy",
+    "Blame",
+)
+
 
 # ── Анализ когнитивных искажений ──
 
 
 def build_system_prompt(language: str = "ru") -> str:
-    listing = "\n".join(f"{i + 1}. {d}" for i, d in enumerate(DISTORTIONS))
-
     if language == "en":
+        listing = "\n".join(f"{i + 1}. {d}" for i, d in enumerate(DISTORTIONS_EN))
         return f"""You are a CBT (cognitive-behavioral therapy) expert. Your task is to identify cognitive distortions in an automatic thought.
 
-Here is the full list of cognitive distortions. Pick name ONLY from this Russian list (do not translate names, keep them in Russian exactly as written):
+Here is the full list of cognitive distortions. Pick names ONLY from this list:
 {listing}
 
 Rules:
 - Identify 0 to 3 distortions from the list above
-- Use ONLY names from the list, do not invent new ones
-- The "name" field MUST be the Russian name from the list above, verbatim
-- The "explanation" field MUST be in English, describing why this distortion applies to the thought
+- Use ONLY names from the list, verbatim — do not invent variations
+- Both "name" and "explanation" must be in English
 - If the thought contains no distortions, return an empty distortions array
 - If the input is gibberish, random characters, test input like "asdf", "zzz", or otherwise meaningless — return an empty distortions array. DO NOT force distortions onto nonsense.
 - Reply ONLY as JSON
@@ -47,11 +68,12 @@ Rules:
 Response format:
 {{
   "distortions": [
-    {{ "name": "Name from the list above in Russian", "explanation": "Brief explanation in English of why this distortion applies" }}
+    {{ "name": "Name from the list above, verbatim", "explanation": "Brief explanation in English" }}
   ]
 }}"""
 
     # default: ru
+    listing = "\n".join(f"{i + 1}. {d}" for i, d in enumerate(DISTORTIONS))
     return f"""Ты — опытный специалист в КПТ (когнитивно-поведенческая терапия). Твоя задача — определить когнитивные искажения в автоматической мысли.
 
 Вот полный список когнитивных искажений. Выбирай ТОЛЬКО из этого списка:
