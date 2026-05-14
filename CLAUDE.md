@@ -62,13 +62,10 @@ CBT Thought Analyzer — десктопное приложение для раз
 
 Сначала полноценное веб-приложение + бэкенд. Затем iOS-приложение, которое ходит на тот же бэк (бэк выдаёт OpenAPI-спеку → генерится Swift-клиент).
 
-### Фронтенд
+### Клиенты
 
-- **React 18** + **TypeScript**
-- **Vite** — сборка и dev server
-- **Tailwind CSS v4** (через `@tailwindcss/vite`, без конфиг-файла) — UI
-- Адрес бэка задаётся через `VITE_API_URL` в `.env`
-- Анонимный `X-Device-Id` (UUID в localStorage) шлётся в каждом запросе — для rate-limit
+- Веб-фронта в этом репозитории **нет** (выпилен 2026-05-15 — основной клиент теперь iOS-приложение)
+- iOS-клиент (SwiftUI) живёт в отдельном репозитории `~/Projects/abc_app_ios/`. Он шлёт `X-Device-Id` (UUID в UserDefaults) в каждом запросе — для rate-limit
 
 ### Бэкенд
 
@@ -82,9 +79,8 @@ CBT Thought Analyzer — десктопное приложение для раз
 
 ### Деплой
 
-- Бэкенд в k8s на Hetzner-ноде, манифесты в `deploy/` (kustomize)
-- Ingress + cert-manager → HTTPS
-- Фронт пока локально / vercel / любой статический хостинг
+- Бэкенд в k8s на Hetzner-ноде, манифесты в `deploy/` (kustomize, gitignored — реальные манифесты лежат в Gitea `devops/k8s-apps/cbt-backend/k8s/`)
+- Ingress + Cloudflare edge → HTTPS
 
 ## Groq API — анализ когнитивных искажений
 
@@ -196,98 +192,36 @@ Response format:
 ```
 abc_app/
 ├── CLAUDE.md
-├── src/                         # Фронт (React)
-│   ├── components/
-│   │   ├── ABCLayout.tsx        # Основной layout: C+A сверху, B снизу
-│   │   ├── EmotionsField.tsx    # Поле C — эмоции/последствия
-│   │   ├── SituationField.tsx   # Поле A — ситуация
-│   │   ├── BeliefsField.tsx     # Поле B — мысли с инлайн-анализом
-│   │   ├── BeliefLine.tsx       # Одна строка мысли + лейбл искажения
-│   │   ├── DistortionLabel.tsx  # Лейбл-тег когнитивного искажения
-│   │   ├── TechniqueButtons.tsx # Кнопки выбора техники у строки
-│   │   ├── TechniquePanel.tsx   # Контейнер для активной техники
-│   │   ├── DownwardArrowTechnique.tsx
-│   │   └── SocraticTechnique.tsx
-│   ├── services/
-│   │   └── api.ts               # HTTP-клиент к собственному бэку
-│   ├── hooks/
-│   │   ├── useDebounceAnalysis.ts
-│   │   └── useTechniqueAbort.ts
-│   ├── types/
-│   │   └── index.ts
-│   ├── App.tsx
-│   └── main.tsx
-├── backend/                     # FastAPI-бэк
+├── README.md
+├── backend/                     # FastAPI бэкенд (единственный код в репо)
 │   ├── app/
 │   │   ├── main.py              # FastAPI приложение, эндпоинты
 │   │   ├── schemas.py           # Pydantic-модели запросов/ответов
-│   │   ├── prompts.py           # Промпты для Groq
-│   │   ├── groq_client.py       # httpx-обёртка над Groq API
+│   │   ├── prompts.py           # Промпты для LLM
+│   │   ├── groq_client.py       # httpx-обёртка над OpenRouter (имя историческое)
 │   │   └── rate_limit.py        # In-memory rate-limiter
 │   ├── Dockerfile
 │   ├── docker-compose.yml       # Локальный запуск бэка
 │   ├── requirements.txt
 │   └── .env.example
-├── deploy/                      # k8s манифесты (kustomize)
-│   ├── namespace.yaml
-│   ├── deployment.yaml
-│   ├── service.yaml
-│   ├── ingress.yaml
-│   ├── secret.example.yaml      # Шаблон — реальный секрет через kubectl
-│   └── kustomization.yaml
-├── package.json
-├── vite.config.ts
-├── tsconfig.json
-├── Dockerfile                   # Dev-контейнер фронта
-└── docker-compose.yml           # Dev-контейнер фронта
+└── deploy/                      # gitignored, реальные k8s манифесты в Gitea (devops/k8s-apps)
 ```
 
-## Docker-окружение для разработки
+iOS-клиент: отдельный репозиторий `~/Projects/abc_app_ios/`.
 
-Разработка и тестирование в Docker-контейнере на macOS.
-
-### Dockerfile
-
-- Base image: Node.js 20 Alpine
-- `npm install` для зависимостей
-- Запуск Vite dev server
-
-### docker-compose.yml
-
-- Сервис `app` — Vite dev server на порту 5173
-- Volume mount: весь проект `.:/app` + анонимный volume `/app/node_modules` (чтобы контейнерные node_modules не затирались хостовыми)
-- Hot reload работает для всех файлов: src, конфиги, index.html
-- Порт: `5173:5173`
-
-### Команды
+## Команды разработки (только бэкенд)
 
 ```bash
-# Запуск dev-сервера в контейнере
+cd backend
+
+# Локально без Docker
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env   # OPENROUTER_API_KEY
+uvicorn app.main:app --reload --port 8000
+
+# Через Docker
 docker compose up
-
-# Пересборка после изменения зависимостей (package.json)
-docker compose up --build
-```
-
-Открывай `http://localhost:5173` в браузере на хосте.
-
-### Vite конфиг
-
-`host: '0.0.0.0'` — чтобы dev server был доступен снаружи контейнера.
-
-## Команды разработки
-
-```bash
-# Локальная разработка (без Docker)
-npm install
-npm run dev
-
-# Сборка
-npm run build
-
-# Docker
-docker compose up
-docker compose up --build
 ```
 
 ## iOS-клиент
