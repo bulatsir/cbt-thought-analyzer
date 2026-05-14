@@ -79,8 +79,9 @@ CBT Thought Analyzer — десктопное приложение для раз
 
 ### Деплой
 
-- Бэкенд в k8s на Hetzner-ноде, манифесты в `deploy/` (kustomize, gitignored — реальные манифесты лежат в Gitea `devops/k8s-apps/cbt-backend/k8s/`)
-- Ingress + Cloudflare edge → HTTPS
+- Бэкенд деплоится Docker-образом в любой среде (локально / k8s / etc.)
+- Реальные production-манифесты (k8s ingress, secrets) живут вне публичного репо
+- TLS — на стороне инфраструктуры (например, edge proxy)
 
 ## Groq API — анализ когнитивных искажений
 
@@ -204,7 +205,7 @@ abc_app/
 │   ├── docker-compose.yml       # Локальный запуск бэка
 │   ├── requirements.txt
 │   └── .env.example
-└── deploy/                      # gitignored, реальные k8s манифесты в Gitea (devops/k8s-apps)
+└── deploy/                      # gitignored, реальные k8s манифесты хранятся отдельно
 ```
 
 iOS-клиент: отдельный репозиторий `~/Projects/abc_app_ios/`.
@@ -228,7 +229,7 @@ docker compose up
 
 Нативный SwiftUI-клиент живёт в **отдельном репозитории**: `~/Projects/abc_app_ios/` (не на GitHub — только локально, плюс возможно потом отдельный публичный репо).
 
-**Стек:** SwiftUI + `@Observable` + `URLSession async/await`, никаких сторонних библиотек. Минимум iOS 17.0, Xcode 16+. Bundle ID `com.bulsir.cbtanalyzer`.
+**Стек:** SwiftUI + `@Observable` + `URLSession async/await`, никаких сторонних библиотек. Минимум iOS 17.0, Xcode 16+.
 
 **Архитектура (после pivot 2026-05-14, всё в одном файле `CBTAnalyzer/CBTAnalyzer/ContentView.swift`):**
 - TabView с тремя вкладками: **Анализ / Сохранено / Настройки**

@@ -11,9 +11,9 @@ The mobile app sends a thought (with optional situation and feelings context), a
 - **pydantic** for request/response validation and auto-OpenAPI
 - **LLM** — Llama 3.3 70B via OpenRouter with provider preference `[groq, sambanova-turbo]` (fallbacks enabled)
 - Anonymous `X-Device-Id` (UUID) for rate limiting — in-memory sliding window, 30 req/min default
-- Docker image, deployed on Hetzner k8s via GitOps (Gitea + ArgoCD), TLS via Cloudflare edge
+- Docker image, deployable anywhere; reference setup uses k8s with GitOps
 
-Public endpoint: `https://api-abc.bulsir.com` — Swagger at `/docs`.
+Swagger UI at `/docs` once you have it running.
 
 ## Distortion detection
 
@@ -27,7 +27,7 @@ Server-side guardrails:
 Request:
 
 ```bash
-curl -X POST https://api-abc.bulsir.com/analyze \
+curl -X POST http://localhost:8000/analyze \
   -H 'Content-Type: application/json' \
   -H 'X-Device-Id: 11111111-1111-1111-1111-111111111111' \
   -d '{

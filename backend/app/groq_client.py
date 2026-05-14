@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from typing import Any
 
 import httpx
@@ -35,14 +36,16 @@ TIMEOUT_SECONDS = 20.0
 class GroqClient:
     def __init__(self, api_key: str) -> None:
         self._api_key = api_key
-        self._client = httpx.AsyncClient(
-            timeout=TIMEOUT_SECONDS,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "HTTP-Referer": "https://api-abc.bulsir.com",
-                "X-Title": "CBT Thought Analyzer",
-            },
-        )
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "X-Title": "CBT Thought Analyzer",
+        }
+        # Optional: tag requests in OpenRouter analytics with your public URL.
+        # Set PUBLIC_URL env var if you want this; left blank by default so the
+        # source repo doesn't hardcode a personal deployment URL.
+        if referer := os.environ.get("PUBLIC_URL"):
+            headers["HTTP-Referer"] = referer
+        self._client = httpx.AsyncClient(timeout=TIMEOUT_SECONDS, headers=headers)
 
     async def close(self) -> None:
         await self._client.aclose()
