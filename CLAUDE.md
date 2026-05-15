@@ -101,10 +101,11 @@ CBT Thought Analyzer — десктопное приложение для раз
 
 Контекст A и C передаётся при каждом анализе строки B — это критически важно для качества. Без контекста фраза "всё пропало" может быть чем угодно, а с контекстом "увольнение" + "паника" — очевидная катастрофизация.
 
-С v0.1.6 промпт принимает параметр `language` (`"ru"` или `"en"`):
-- RU-режим — explanation на русском, имена искажений на русском (канонические из `DISTORTIONS`)
-- EN-режим — explanation на английском, **имена всё равно на русском** (модели явно сказано "Pick name ONLY from this Russian list ... keep names in Russian exactly as written"). Это держит JSON-контракт стабильным — iOS-клиент использует один RU→EN mapping (`DistortionDisplayName`), независимо от языка
-- Server-side в `groq_client.analyze()` фильтрует не-канонические имена и логирует drift на WARN — защита от того что Llama 3.3 70B иногда дрейфует на английские имена в EN-режиме
+Промпт принимает параметр `language` (`"ru"` или `"en"`):
+- RU-режим — и `name`, и `explanation` на русском (канонические имена из `DISTORTIONS`)
+- EN-режим — и `name`, и `explanation` на английском (канонические имена из `DISTORTIONS_EN`, тот же порядок что `DISTORTIONS`)
+- Server-side в `groq_client.analyze()` фильтрует имена не из канонического списка **для запрошенного языка** (`_CANONICAL_NAMES_BY_LANG`) и логирует drop на WARN — защита от того что Llama 3.3 70B иногда дрейфует (например отдаёт RU-имя в EN-режиме)
+- iOS-клиент рендерит `distortion.name` напрямую — никакого RU→EN маппинга на клиенте больше нет (был `DistortionDisplayName`, удалён в v0.1.7: имя уже приходит на нужном языке)
 
 Текущий полный текст системного промпта (актуальная версия `backend/app/prompts.py:build_system_prompt`):
 
@@ -153,23 +154,22 @@ CBT Thought Analyzer — десктопное приложение для раз
 # language="en"
 You are a CBT (cognitive-behavioral therapy) expert. Your task is to identify cognitive distortions in an automatic thought.
 
-Here is the full list of cognitive distortions. Pick name ONLY from this Russian list (do not translate names, keep them in Russian exactly as written):
-{18 наименований из DISTORTIONS}
+Here is the full list of cognitive distortions. Pick names ONLY from this list:
+{18 наименований из DISTORTIONS_EN}
 
 Rules:
 - Identify 0 to 3 distortions from the list above
-- Use ONLY names from the list, do not invent new ones
-- The "name" field MUST be the Russian name from the list above, verbatim
-- The "explanation" field MUST be in English, describing why this distortion applies to the thought
+- Use ONLY names from the list, verbatim — do not invent variations
+- Both "name" and "explanation" must be in English
 - If the thought contains no distortions, return an empty distortions array
 - If the input is gibberish, random characters, test input like "asdf", "zzz", or otherwise meaningless — return an empty distortions array. DO NOT force distortions onto nonsense.
 - Reply ONLY as JSON
-- In the explanation do NOT use the words "patient", "client", or "user". Describe the thought itself and why the distortion applies.
+- In the explanation do NOT use the words "patient", "client", or "user". Describe the thought itself and why the distortion applies. For example: "The thought exaggerates consequences..." instead of "The patient exaggerates...".
 
 Response format:
 {
   "distortions": [
-    { "name": "Name from the list above in Russian", "explanation": "Brief explanation in English of why this distortion applies" }
+    { "name": "Name from the list above, verbatim", "explanation": "Brief explanation in English" }
   ]
 }
 ```

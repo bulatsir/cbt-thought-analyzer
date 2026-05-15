@@ -75,21 +75,61 @@ class GroqClient:
             logger.exception("Groq request failed")
             raise HTTPException(status_code=502, detail="Upstream unavailable") from e
 
-        if response.status_code == 401:
-            logger.error("Groq returned 401 — check GROQ_API_KEY")
-            raise HTTPException(status_code=500, detail="Upstream auth failure")
-        if response.status_code == 429:
-            raise HTTPException(status_code=429, detail="Upstream rate-limited")
-        if response.status_code >= 500:
-            logger.error("Groq 5xx: %s %s", response.status_code, response.text)
-            raise HTTPException(status_code=502, detail="Upstream error")
-        if response.status_code >= 400:
-            logger.error("Groq 4xx: %s %s", response.status_code, response.text)
+        # Parse the body once. OpenRouter (and the providers behind it) report
+        # errors as a JSON {"error": {"code", "message"}} object — sometimes
+        # even with HTTP 200, when a provider fails after accepting the
+        # request. So treat a present "error" key as failure regardless of
+        # status, and always surface the upstream message in logs.
+        try:
+            data = response.json()
+        except (json.JSONDecodeError, ValueError):
+            data = None
+
+        status = response.status_code
+        err = data.get("error") if isinstance(data, dict) else None
+
+        if err is not None or status >= 400:
+            err = err if isinstance(err, dict) else {}
+            code = err.get("code", status)
+            message = err.get("message") or response.text[:300]
+            blob = f"{code} {message}".lower()
+            # Groq returns "invalid_api_key" (not 403) when the key is scoped
+            # or its Allowed Models list excludes this model — looks like a
+            # generic upstream failure unless we name it. See memory:
+            # groq_key_scope_gotcha.
+            is_auth = (
+                status in (401, 403)
+                or code in (401, 403)
+                or "invalid_api_key" in blob
+                or "invalid api key" in blob
+            )
+            if is_auth:
+                logger.error(
+                    "Upstream auth failure (status=%s code=%s): %s — check "
+                    "GROQ_API_KEY scope / Allowed Models",
+                    status,
+                    code,
+                    message,
+                )
+                raise HTTPException(status_code=500, detail="Upstream auth failure")
+            if status == 429 or code == 429:
+                logger.warning("Upstream rate-limited: %s", message)
+                raise HTTPException(status_code=429, detail="Upstream rate-limited")
+            logger.error(
+                "Upstream error (status=%s code=%s): %s", status, code, message
+            )
             raise HTTPException(status_code=502, detail="Upstream error")
 
-        data = response.json()
-        content = data.get("choices", [{}])[0].get("message", {}).get("content")
+        if not isinstance(data, dict):
+            logger.warning("Non-JSON from upstream: %s", response.text[:200])
+            raise HTTPException(status_code=502, detail="Invalid response from upstream")
+
+        choices = data.get("choices") or []
+        content = (
+            choices[0].get("message", {}).get("content") if choices else None
+        )
         if not content:
+            logger.warning("Empty content from upstream: %s", str(data)[:200])
             raise HTTPException(status_code=502, detail="Empty response from upstream")
 
         try:
