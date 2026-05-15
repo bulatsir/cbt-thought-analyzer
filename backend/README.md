@@ -5,10 +5,8 @@ FastAPI-прокси к Groq API. Хранит ключ на сервере, д�
 ## Эндпоинты
 
 - `GET  /health` — readiness/liveness
-- `POST /analyze` — `{thought, situation?, emotions?}` → `{distortions: [...]}`
-- `POST /downward-arrow` — `{thought, distortions, history, situation?, emotions?}` → `{question, isCoreBelief}`
-- `POST /socratic` — `{thought, distortions, history, situation?, emotions?}` → `{question}`
-- Все защищены `X-Device-Id` хедером (rate-limit 30/мин).
+- `POST /analyze` — `{thought, situation?, emotions?, language?}` → `{distortions: [...]}`
+- Защищён `X-Device-Id` хедером (rate-limit 30/мин).
 
 Swagger UI: `/docs`. OpenAPI: `/openapi.json` (нужен для генерации iOS-клиента).
 

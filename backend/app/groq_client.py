@@ -9,10 +9,6 @@ from fastapi import HTTPException
 from app.prompts import (
     DISTORTIONS,
     DISTORTIONS_EN,
-    build_downward_arrow_system_prompt,
-    build_downward_arrow_user_prompt,
-    build_socratic_system_prompt,
-    build_socratic_user_prompt,
     build_system_prompt,
     build_user_prompt,
 )
@@ -20,9 +16,6 @@ from app.schemas import (
     AnalyzeRequest,
     AnalyzeResponse,
     Distortion,
-    DownwardArrowResponse,
-    SocraticResponse,
-    TechniqueRequest,
 )
 
 _CANONICAL_NAMES_BY_LANG: dict[str, set[str]] = {
@@ -140,28 +133,3 @@ class GroqClient:
                 dropped,
             )
         return AnalyzeResponse(distortions=distortions)
-
-    async def downward_arrow(self, req: TechniqueRequest) -> DownwardArrowResponse:
-        parsed = await self._call(
-            build_downward_arrow_system_prompt(),
-            build_downward_arrow_user_prompt(
-                req.thought, req.distortions, req.history, req.situation, req.emotions
-            ),
-        )
-        question = parsed.get("question")
-        if not isinstance(question, str) or not question.strip():
-            question = "И что это значит для тебя?"
-        is_core = parsed.get("isCoreBelief") is True
-        return DownwardArrowResponse(question=question, isCoreBelief=is_core)
-
-    async def socratic(self, req: TechniqueRequest) -> SocraticResponse:
-        parsed = await self._call(
-            build_socratic_system_prompt(),
-            build_socratic_user_prompt(
-                req.thought, req.distortions, req.history, req.situation, req.emotions
-            ),
-        )
-        question = parsed.get("question")
-        if not isinstance(question, str) or not question.strip():
-            question = "Какие факты подтверждают эту мысль?"
-        return SocraticResponse(question=question)

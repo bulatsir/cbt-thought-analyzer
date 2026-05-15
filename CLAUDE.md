@@ -74,7 +74,7 @@ CBT Thought Analyzer — десктопное приложение для раз
 - **pydantic** — валидация запросов/ответов, авто-OpenAPI
 - Ключ Groq в env (`GROQ_API_KEY`), в k8s — через Secret
 - Rate-limit по `X-Device-Id` (in-memory sliding window, 30/мин по умолчанию)
-- Эндпоинты: `/analyze`, `/downward-arrow`, `/socratic`, `/health`
+- Эндпоинты: `/analyze`, `/health`
 - Промпты живут на бэке (`backend/app/prompts.py`) — можно править без передеплоя фронта
 
 ### Деплой
@@ -250,8 +250,8 @@ docker compose up
 **Backend контракт:**
 - `AnalyzeRequest.emotions` (не `feelings` — UI-лейбл другой!)
 - `AnalyzeRequest.language: "ru" | "en"`
-- `DownwardArrowResponse.isCoreBelief` — camelCase в JSON, **НЕ** включать `JSONDecoder.keyDecodingStrategy = .convertFromSnakeCase`
-- Имена искажений в ответе — всегда из канонического RU-списка `DISTORTIONS`
+- **НЕ** включать `JSONDecoder.keyDecodingStrategy = .convertFromSnakeCase` — ключи бэка отдаются как есть
+- Имена искажений в ответе — из канонического списка `DISTORTIONS` (RU) / `DISTORTIONS_EN` (EN), по выбранному `language`
 
 ## Шаринг приложения (для одного человека, без App Store)
 

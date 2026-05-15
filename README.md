@@ -29,7 +29,7 @@ curl -X POST http://localhost:8000/analyze \
 - `language` — `"ru"` (default) or `"en"`; both `name` and `explanation` come back in that language
 - Names are picked from a fixed list in `backend/app/prompts.py` — non-canonical replies from the model are dropped server-side
 - Gibberish input (`"asdf"`, `"zzz"`, …) → empty `distortions` array
-- Other endpoints: `GET /health`, `POST /downward-arrow`, `POST /socratic`, Swagger at `/docs`
+- Other endpoints: `GET /health`, Swagger at `/docs`
 
 ## Run locally
 

@@ -7,13 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.groq_client import GroqClient
 from app.rate_limit import InMemoryRateLimiter
-from app.schemas import (
-    AnalyzeRequest,
-    AnalyzeResponse,
-    DownwardArrowResponse,
-    SocraticResponse,
-    TechniqueRequest,
-)
+from app.schemas import AnalyzeRequest, AnalyzeResponse
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO"),
@@ -75,21 +69,3 @@ async def analyze(
     _: str = Depends(rate_limit),
 ) -> AnalyzeResponse:
     return await groq.analyze(body)
-
-
-@app.post("/downward-arrow", response_model=DownwardArrowResponse)
-async def downward_arrow(
-    body: TechniqueRequest,
-    groq: GroqClient = Depends(get_groq),
-    _: str = Depends(rate_limit),
-) -> DownwardArrowResponse:
-    return await groq.downward_arrow(body)
-
-
-@app.post("/socratic", response_model=SocraticResponse)
-async def socratic(
-    body: TechniqueRequest,
-    groq: GroqClient = Depends(get_groq),
-    _: str = Depends(rate_limit),
-) -> SocraticResponse:
-    return await groq.socratic(body)
