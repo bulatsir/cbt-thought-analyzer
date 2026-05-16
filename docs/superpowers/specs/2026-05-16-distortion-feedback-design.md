@@ -26,7 +26,27 @@ Two product constraints emerged in brainstorming:
 The user explicitly asked to fix bug #3 before the feature, because the
 feature shares its core invariant.
 
-### Root cause (diagnosed from code, unambiguous)
+### Approach: reproduce first, fix the confirmed cause
+
+The fix is **gated on reproduction**, not applied blind. Code reading gives
+two *hypotheses* (A and B below); the simulator decides which actually
+fire. Sequence:
+
+1. **Instrument.** Add a single `print`/`os_log` line at the top of
+   `runAnalysis()` logging: thought id (short), `thought.text` hash,
+   `situation`/`feelings` hash, `didAnalyze`, and a coarse "trigger" guess.
+   No behaviour change — pure observation.
+2. **Reproduce.** User exercises the simulator and reproduces the
+   "I changed nothing and it re-analyzed" event, capturing the log around
+   it. Specifically tries: editing situation/feelings then leaving the
+   thoughts alone (tests A); switching to Saved tab and back, backgrounding
+   the app, navigating away/in (tests B).
+3. **Confirm** which hypothesis the log supports (A, B, or both).
+4. **Apply the targeted fix** for the confirmed cause(s) only (see Fix
+   below). Re-run step 2 to verify the phantom is gone and legitimate
+   re-analysis (continuing to type in the same thought) still works.
+
+### Hypothesis A — context fan-out (from code reading)
 
 `ThoughtRow` carries:
 
@@ -49,31 +69,42 @@ Secondary harm: N thoughts ⇒ N simultaneous `/analyze` calls ⇒ rate-limit
 pressure.
 
 Context *should* influence results (per CLAUDE.md, A/C context is critical to
-quality) — the bug is not that context matters, it is the **per-keystroke,
-all-rows churn**, including finished thoughts the user is not looking at.
+quality) — the bug under this hypothesis is not that context matters, it is
+the **per-keystroke, all-rows churn**, including finished thoughts the user
+is not looking at.
 
-### Fix
+### Hypothesis B — `.task` lifecycle re-run (the "I changed nothing" symptom)
 
-Make a settled thought re-analyze **only when its own text changes**, not
-when ambient context churns:
+SwiftUI re-runs a `.task` whenever its view disappears and reappears, even
+if the id is unchanged: tab switch (Analyze → Saved → Analyze), app
+background/foreground, navigation push/pop. Nothing the user typed changed,
+yet `/analyze` fires again. This matches the user's report of phantom
+re-analysis with zero edits, which Hypothesis A alone does not explain.
 
-- A thought that is **already analyzed and not currently focused** derives
-  its `.task` id from `thought.text` + `language` only — ambient
-  `situation`/`feelings` edits no longer bump its id.
-- A thought that is **not yet analyzed, or is currently focused/active**
-  still incorporates `situation`/`feelings`, but from a **committed
-  snapshot** updated on field-commit (focus loss / `.onSubmit` of the
-  situation/feelings fields), not on every character. This kills the
-  per-keystroke fan-out even for the active thought while preserving
-  context-sensitivity.
+### Fix (apply only what reproduction confirms)
 
-Concretely: introduce a committed context value (`@State` snapshots of
-situation/feelings updated in `.onChange(of: focusedField)` when focus
-leaves `.situation`/`.feelings`, or via `.onSubmit`). `AnalysisInput` for a
-settled row excludes context; for an active/unanalyzed row it uses the
-committed snapshot. Exact wiring is left to the implementation plan; the
-invariant is the contract: **settled thought ⇒ stable id ⇒ no phantom
-re-fire.**
+Two independent levers; pick per confirmed cause. They compose.
+
+- **For Hypothesis A — settled-thought stable id.** A thought that is
+  already analyzed and not currently focused derives its `.task` id from
+  `thought.text` + `language` only; ambient `situation`/`feelings` edits no
+  longer bump it. Active/unanalyzed thoughts still use context, but from a
+  **committed snapshot** (situation/feelings captured on focus-loss /
+  `.onSubmit`, not per keystroke). Invariant: **settled thought ⇒ stable id.**
+- **For Hypothesis B (and a safety net for any id thrash) — idempotent
+  signature guard.** `Thought` records the signature it was last analyzed
+  for (text + committed context + language). `runAnalysis()` early-returns
+  **before the network call** if the current signature equals the
+  last-analyzed one. Any `.task` restart for an unchanged input becomes a
+  no-op; a real edit (different signature) still analyzes. This alone makes
+  `/analyze` fire iff the input genuinely changed, regardless of why
+  `.task` re-ran.
+
+Recommended end state: the signature guard is the robust core (covers B and
+hardens A); the settled-id refinement additionally removes the wasteful
+debounce-sleep churn on every context keystroke. Exact wiring is left to
+the implementation plan; the contract is: **`/analyze` fires only when the
+analyzed input actually changed.**
 
 ### Why this is a true pre-step, not folded in
 
