@@ -1200,3 +1200,46 @@ B4 was withdrawn by the reviewer after verification (`DistortionFeedback`
 is `Hashable` ⇒ `.sensoryFeedback` trigger is `Equatable`). S5/N2 confirmed
 sound. Reviewer verdict after these edits: architecture sound, remaining
 items are polish.
+
+---
+
+## Post-implementation notes (2026-05-16, all 13 tasks done)
+
+Implemented via subagent-driven development; per-task spec + quality
+review; verified on a real device.
+
+**Bug #3 fix evolved during device testing.** Pre-step 0 shipped as
+planned (diagnostic → signature guard → settled-id), but on-device the
+`isSettled`-in-`analysisID` lever caused a status↔id feedback loop:
+`runAnalysis` mutates `thought.status` → `isSettled` flips → `analysisID`
+changes → `.task` restarts → endless idle/loading storm that also wiped
+feedback. Fix: `analysisID` is now a **pure function of genuine inputs**
+(`thought.text` + committed situation/feelings + language), with NO
+dependence on `isSettled`/status. Bug #3 remains fixed by committed-context
+-on-blur (kills per-keystroke fan-out) + the signature guard (absorbs
+lifecycle re-fires). `isSettled` is retained solely as the `ratable:` gate.
+Lesson: never tie `.task(id:)` to state the task itself mutates.
+
+**Extra robustness fixes applied during review (beyond the plan):**
+- `feedbackBinding` captures the projected `$thought` binding (not a `self`
+  snapshot).
+- `DistortionCard` got an optimistic local `@State` (`local`) synced via
+  `.onChange(of: feedback)`/`.onAppear` so rapid taps over the async store
+  (Saved-detail) aren't lost.
+- `performSave` clears `committedSituation/Feelings` (no ghost context).
+- `DistortionCardA11y` ViewModifier: `.combine`+hint for read-only,
+  `.contain` for ratable; 44pt touch targets on thumbs/chips.
+
+**Final whole-feature review dispositions:**
+- *Reset of all `thought.feedback` on any re-analysis* — flagged by the
+  final reviewer as "must fix", but this is the **agreed design**
+  (brainstorming: "тронул мысль → повторный анализ → оценка слетает") and
+  was explicitly confirmed by the user on-device ("так задумано"). Kept
+  intentionally; not a defect. The reviewer lacked that context.
+- *Saved-detail rapid-tap Task race* — known **minor**: optimistic `local`
+  shows the correct value, the store converges to the last tap's value
+  (no data loss); only a brief visual flicker is possible under very rapid
+  taps. Accepted; logged in `v1_improvement_backlog` for a later
+  cancel-previous-Task serialization.
+- Minors (redundant `onAppear` init; manual struct rebuild in
+  `updateFeedback`) — backlog.
