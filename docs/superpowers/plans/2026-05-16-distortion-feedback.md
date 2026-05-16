@@ -26,6 +26,12 @@
   `Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>`
 - Simulator steps are performed by the user; the plan states the exact
   action and the exact expected observation.
+- **Line numbers are approximate against the pristine file.** Earlier
+  tasks insert lines, so every later `~line N` / `lines X–Y` reference
+  drifts. **Always locate an edit by its quoted textual anchor and
+  enclosing type/function name, never by absolute line number.** Where a
+  task says "replace lines X–Y", it means "replace the named construct in
+  full".
 
 ## File responsibility map
 
@@ -67,17 +73,27 @@ private let analysisLog = Logger(subsystem: "com.bulsir.cbtanalyzer", category: 
 - [ ] **Step 2: Log every entry into `runAnalysis`**
 
 In `runAnalysis()`, as the very first lines inside the method (before
-`let trimmed = ...`), insert:
+`let trimmed = ...`), insert. `status` is logged as a **coarse case name
+only** — never the associated error string (it can echo backend response
+bodies; the analyzed thought is private mental-health content). `hashValue`
+is per-process seeded, so only compare hashes **within one app run**, never
+across launches:
 
 ```swift
         let dbgText = thought.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let statusName: String
+        switch thought.status {
+        case .idle:    statusName = "idle"
+        case .loading: statusName = "loading"
+        case .error:   statusName = "error"
+        }
         analysisLog.debug("""
         runAnalysis id=\(String(thought.id.uuidString.prefix(4)), privacy: .public) \
         textHash=\(dbgText.hashValue, privacy: .public) \
         sitHash=\(self.situation.hashValue, privacy: .public) \
         feelHash=\(self.feelings.hashValue, privacy: .public) \
         didAnalyze=\(thought.didAnalyze, privacy: .public) \
-        status=\(String(describing: thought.status), privacy: .public)
+        status=\(statusName, privacy: .public)
         """)
 ```
 
@@ -162,29 +178,33 @@ In `struct Thought`, add a stored property after `var didAnalyze`:
 
 - [ ] **Step 2: Compute the signature and short-circuit unchanged re-runs**
 
-Replace the body of `runAnalysis()` from its start through the
-`thought.status = .loading` line with:
+**Do NOT delete the Task 1 diagnostic block.** Leave the `dbgText` /
+`statusName` / `analysisLog.debug(...)` lines added in Task 1 exactly where
+they are (the first lines of `runAnalysis()`). Replace **from the line
+`let trimmed = ...` (immediately after that diagnostic block) through the
+`thought.status = .loading` line** with the following. The guard is a
+**pure function of the input signature** — independent of `didAnalyze`,
+`status`, and the `.task` id. This is the spec's contract: `/analyze` fires
+iff the analyzed input genuinely changed, regardless of why `.task` re-ran.
 
 ```swift
-    @MainActor
-    private func runAnalysis() async {
         let trimmed = thought.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             thought.distortions = []
             thought.status = .idle
             thought.didAnalyze = false
             thought.lastAnalyzedSignature = nil
+            thought.feedback = [:]
             return
         }
 
         let signature = "\(trimmed)\u{1F}\(situation)\u{1F}\(feelings)\u{1F}\(settings.language.rawValue)"
 
-        // .task may restart for reasons unrelated to input (tab switch,
-        // foreground, harmless id thrash). If we already analyzed this exact
-        // input, do not hit the network again — and do not disturb feedback.
-        if thought.didAnalyze, thought.lastAnalyzedSignature == signature {
-            if case .error = thought.status { } else { return }
-        }
+        // .task restarts for reasons unrelated to input (tab switch,
+        // foreground, isSettled flipping the id). Network fires ONLY when the
+        // signature changed. An errored input is retried only when the user
+        // edits it (→ new signature), never on a bare lifecycle restart.
+        if thought.lastAnalyzedSignature == signature { return }
 
         do {
             try await Task.sleep(for: .milliseconds(1500))
@@ -195,24 +215,35 @@ Replace the body of `runAnalysis()` from its start through the
         thought.status = .loading
 ```
 
-- [ ] **Step 3: Record the signature on success**
+(`feedback = [:]` in the empty-guard branch above is the Task 10 reset for
+the cleared-thought case; it is placed here so it is not forgotten — Task
+10 Step 3 only adds the success-branch reset.)
 
-In the success branch of the `do/catch`, set the signature alongside
-`didAnalyze`:
+- [ ] **Step 3: Record the signature on success AND on error**
+
+Replace the whole `do/catch` of `runAnalysis()` with the following. The
+signature is stored on **both** success and error so an errored input is
+not auto-retried on every lifecycle `.task` restart — only a real edit
+(new signature) re-attempts. `thought.feedback = [:]` is reset **only in
+the success branch** (next to `distortions`): verdicts then survive a
+failed re-analysis and do not flicker during the 1.5 s debounce. Cancel
+branches touch nothing.
 
 ```swift
         do {
             let distortions = try await BackendClient.shared.analyze(req)
             thought.distortions = distortions
+            thought.feedback = [:]            // results changed → prior verdicts no longer apply
             thought.status = .idle
-            thought.didAnalyze = true   // включая success-empty
+            thought.didAnalyze = true         // включая success-empty
             thought.lastAnalyzedSignature = signature
         } catch is CancellationError {
-            // не трогаем didAnalyze
+            // не трогаем didAnalyze / lastAnalyzedSignature / feedback
         } catch let urlError as URLError where urlError.code == .cancelled {
-            // не трогаем didAnalyze
+            // не трогаем didAnalyze / lastAnalyzedSignature / feedback
         } catch {
             thought.status = .error(error.localizedDescription)
+            thought.lastAnalyzedSignature = signature   // do not auto-retry same input on lifecycle
         }
 ```
 
@@ -264,15 +295,26 @@ transitions. Place it directly after `.scrollDismissesKeyboard(.interactively)`
 
 ```swift
             .scrollDismissesKeyboard(.interactively)
-            .onChange(of: focusedField) { old, _ in
+            .onChange(of: focusedField) { old, new in
                 if old == .situation { committedSituation = situation }
                 if old == .feelings  { committedFeelings  = feelings  }
+                // Entering a thought field: ensure the latest context is
+                // committed even if the user never blurred situation/feelings
+                // (typed context → tapped straight into the thought).
+                if case .thought = new {
+                    committedSituation = situation
+                    committedFeelings  = feelings
+                }
             }
             .onAppear {
                 committedSituation = situation
                 committedFeelings  = feelings
             }
 ```
+
+Without the `if case .thought = new` commit, a thought analyzed right
+after typing context (without blurring it) would be sent with **stale
+empty context** — a quality regression CLAUDE.md explicitly warns against.
 
 - [ ] **Step 3: Pass committed context (not live) into `ThoughtRow`**
 
@@ -351,14 +393,22 @@ Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Wrap the diagnostic log in `#if DEBUG`**
 
-Surround the `analysisLog.debug(""" ... """)` block (and its `dbgText`
-line) added in Task 1 with:
+Surround the **entire** Task 1 diagnostic block — the `dbgText` line, the
+`statusName` switch, and the `analysisLog.debug(""" ... """)` call — with
+`#if DEBUG` / `#endif`. It is the contiguous block at the very top of
+`runAnalysis()`, immediately above `let trimmed = ...`:
 
 ```swift
         #if DEBUG
         let dbgText = thought.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let statusName: String
+        switch thought.status {
+        case .idle:    statusName = "idle"
+        case .loading: statusName = "loading"
+        case .error:   statusName = "error"
+        }
         analysisLog.debug("""
-        ... (unchanged body) ...
+        ... (unchanged body from Task 1 Step 2) ...
         """)
         #endif
 ```
@@ -629,7 +679,7 @@ struct DistortionCard: View {
         }
         .font(.callout)
         .padding(.top, 2)
-        .sensoryFeedback(.selection, trigger: feedback)
+        .sensoryFeedback(.selection, trigger: feedback?.verdict)
 
         if verdict == .down {
             VStack(alignment: .leading, spacing: 6) {
@@ -760,41 +810,26 @@ Step 2) with:
                                        feedback: feedbackBinding(d.name))
 ```
 
-- [ ] **Step 3: Reset feedback only on genuine (re-)analysis**
+- [ ] **Step 3: Verify the feedback-reset points (already added in Task 3)**
 
-In `runAnalysis()`: in the empty-guard branch (where `trimmed.isEmpty`),
-add `thought.feedback = [:]` next to the other resets. Then, after the
-signature short-circuit `if thought.didAnalyze, thought.lastAnalyzedSignature == signature { ... }`
-block and before `try await Task.sleep`, add a line that clears feedback
-because we are about to (re)analyze a genuinely changed input:
+No code change here — the reset is already wired by Task 3:
 
-```swift
-        if thought.didAnalyze, thought.lastAnalyzedSignature == signature {
-            if case .error = thought.status { } else { return }
-        }
+- **Empty-guard branch** (Task 3 Step 2 snippet): `thought.feedback = [:]`
+  fires when the thought text is cleared.
+- **Success branch** (Task 3 Step 3 snippet): `thought.feedback = [:]`
+  fires next to `thought.distortions = distortions`, i.e. only when new
+  results actually arrive.
 
-        thought.feedback = [:]   // genuine re-analysis → prior verdicts no longer apply
+Confirm by reading `runAnalysis()`: feedback is reset in exactly those two
+places and **nowhere else**. Consequences (do not "fix" them — they are
+the intended behaviour):
 
-        do {
-            try await Task.sleep(for: .milliseconds(1500))
-```
-
-And in the empty-guard branch:
-
-```swift
-        guard !trimmed.isEmpty else {
-            thought.distortions = []
-            thought.status = .idle
-            thought.didAnalyze = false
-            thought.lastAnalyzedSignature = nil
-            thought.feedback = [:]
-            return
-        }
-```
-
-(Because the signature guard returns early for unchanged input, switching
-tabs / foregrounding does **not** reach this reset — verdicts survive, as
-required.)
+- Signature guard returns before any reset → tab-switch / foreground keeps
+  verdicts. ✓
+- A failed re-analysis goes to the `catch` (no reset) → verdicts survive a
+  network error instead of vanishing. ✓
+- No reset before/around the 1.5 s debounce → verdicts do not flicker away
+  while the new analysis is in flight. ✓
 
 - [ ] **Step 4: Build**
 
@@ -1112,4 +1147,31 @@ defined Task 7 and called with exactly those labels in Tasks 11 and 12.
 (Task 10) and SavedDetailView (Task 12), matching `DistortionCard`'s
 `@Binding var feedback: DistortionFeedback?` (Task 9). `isSettled` defined
 Task 4, reused Task 10. `lastAnalyzedSignature` defined Task 3, used Tasks
-3 and 10. No drift found.
+3 and 10.
+
+**Post-review revisions (ios-code-reviewer pass, 2026-05-16):** The initial
+self-review's "no drift" claim was wrong and is superseded. Fixes applied
+to this plan:
+
+- **B6:** added the line-numbers-are-approximate banner; Task 3 Step 2
+  rewritten so it preserves the Task 1 diagnostic block (it previously
+  deleted it, breaking Task 5).
+- **B1:** the signature guard is now signature-only
+  (`lastAnalyzedSignature == signature`), `didAnalyze`/`.error` exception
+  removed; signature is stored on the error branch too. This is what
+  actually delivers the spec's "fires iff input changed" contract for
+  errored/edge thoughts.
+- **B2:** context is committed on entering a thought field, not only on
+  blur — prevents analysis with stale-empty context.
+- **S1:** feedback reset moved into the success branch only (+ empty-guard
+  branch); no pre-debounce reset → no verdict flicker, survives a failed
+  re-analysis.
+- **S3:** haptic triggers on `feedback?.verdict`, not the whole feedback
+  object, so reason-chip toggles don't double-buzz.
+- **B5:** `status` logged as a coarse case name (no raw backend error
+  string at `.public`); per-process hash caveat documented.
+
+B4 was withdrawn by the reviewer after verification (`DistortionFeedback`
+is `Hashable` ⇒ `.sensoryFeedback` trigger is `Equatable`). S5/N2 confirmed
+sound. Reviewer verdict after these edits: architecture sound, remaining
+items are polish.
