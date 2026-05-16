@@ -194,7 +194,6 @@ iff the analyzed input genuinely changed, regardless of why `.task` re-ran.
             thought.status = .idle
             thought.didAnalyze = false
             thought.lastAnalyzedSignature = nil
-            thought.feedback = [:]
             return
         }
 
@@ -215,32 +214,29 @@ iff the analyzed input genuinely changed, regardless of why `.task` re-ran.
         thought.status = .loading
 ```
 
-(`feedback = [:]` in the empty-guard branch above is the Task 10 reset for
-the cleared-thought case; it is placed here so it is not forgotten — Task
-10 Step 3 only adds the success-branch reset.)
+**Build-order note:** Task 3 must NOT reference `thought.feedback` — that
+property is introduced only in Task 6. Pre-step 0 (Tasks 1–5) stays a
+standalone, independently-shippable bug fix. All `feedback`-reset wiring is
+added later in Task 10 Step 3 (after Task 6 defines the type).
 
 - [ ] **Step 3: Record the signature on success AND on error**
 
 Replace the whole `do/catch` of `runAnalysis()` with the following. The
 signature is stored on **both** success and error so an errored input is
 not auto-retried on every lifecycle `.task` restart — only a real edit
-(new signature) re-attempts. `thought.feedback = [:]` is reset **only in
-the success branch** (next to `distortions`): verdicts then survive a
-failed re-analysis and do not flicker during the 1.5 s debounce. Cancel
-branches touch nothing.
+(new signature) re-attempts. Cancel branches touch nothing.
 
 ```swift
         do {
             let distortions = try await BackendClient.shared.analyze(req)
             thought.distortions = distortions
-            thought.feedback = [:]            // results changed → prior verdicts no longer apply
             thought.status = .idle
             thought.didAnalyze = true         // включая success-empty
             thought.lastAnalyzedSignature = signature
         } catch is CancellationError {
-            // не трогаем didAnalyze / lastAnalyzedSignature / feedback
+            // не трогаем didAnalyze / lastAnalyzedSignature
         } catch let urlError as URLError where urlError.code == .cancelled {
-            // не трогаем didAnalyze / lastAnalyzedSignature / feedback
+            // не трогаем didAnalyze / lastAnalyzedSignature
         } catch {
             thought.status = .error(error.localizedDescription)
             thought.lastAnalyzedSignature = signature   // do not auto-retry same input on lifecycle
@@ -810,26 +806,55 @@ Step 2) with:
                                        feedback: feedbackBinding(d.name))
 ```
 
-- [ ] **Step 3: Verify the feedback-reset points (already added in Task 3)**
+- [ ] **Step 3: Add the feedback-reset points in `runAnalysis()`**
 
-No code change here — the reset is already wired by Task 3:
+`Thought.feedback` now exists (Task 6), so wire the reset. Add
+`thought.feedback = [:]` in **exactly two** places in `runAnalysis()` and
+nowhere else:
 
-- **Empty-guard branch** (Task 3 Step 2 snippet): `thought.feedback = [:]`
-  fires when the thought text is cleared.
-- **Success branch** (Task 3 Step 3 snippet): `thought.feedback = [:]`
-  fires next to `thought.distortions = distortions`, i.e. only when new
-  results actually arrive.
+1. In the **empty-guard branch** — alongside the other resets:
 
-Confirm by reading `runAnalysis()`: feedback is reset in exactly those two
-places and **nowhere else**. Consequences (do not "fix" them — they are
-the intended behaviour):
+```swift
+        guard !trimmed.isEmpty else {
+            thought.distortions = []
+            thought.status = .idle
+            thought.didAnalyze = false
+            thought.lastAnalyzedSignature = nil
+            thought.feedback = [:]
+            return
+        }
+```
 
-- Signature guard returns before any reset → tab-switch / foreground keeps
-  verdicts. ✓
+2. In the **success branch only**, immediately after
+   `thought.distortions = distortions`:
+
+```swift
+        do {
+            let distortions = try await BackendClient.shared.analyze(req)
+            thought.distortions = distortions
+            thought.feedback = [:]            // results changed → prior verdicts no longer apply
+            thought.status = .idle
+            thought.didAnalyze = true         // включая success-empty
+            thought.lastAnalyzedSignature = signature
+        } catch is CancellationError {
+            // не трогаем didAnalyze / lastAnalyzedSignature / feedback
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            // не трогаем didAnalyze / lastAnalyzedSignature / feedback
+        } catch {
+            thought.status = .error(error.localizedDescription)
+            thought.lastAnalyzedSignature = signature   // do not auto-retry same input on lifecycle
+        }
+```
+
+Do **not** add a reset before/around the 1.5 s debounce or after the
+signature guard. The resulting behaviour (intended — do not "fix"):
+
+- Signature guard returns before reaching either reset → tab-switch /
+  foreground keeps verdicts. ✓
 - A failed re-analysis goes to the `catch` (no reset) → verdicts survive a
   network error instead of vanishing. ✓
-- No reset before/around the 1.5 s debounce → verdicts do not flicker away
-  while the new analysis is in flight. ✓
+- No pre-debounce reset → verdicts do not flicker away while a new analysis
+  is in flight. ✓
 
 - [ ] **Step 4: Build**
 
