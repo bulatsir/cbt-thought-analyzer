@@ -65,7 +65,7 @@ CBT Thought Analyzer — десктопное приложение для раз
 ### Клиенты
 
 - Веб-фронта в этом репозитории **нет** (выпилен 2026-05-15 — основной клиент теперь iOS-приложение)
-- iOS-клиент (SwiftUI) живёт в отдельном репозитории `~/Projects/abc_app_ios/`. Он шлёт `X-Device-Id` (UUID в UserDefaults) в каждом запросе — для rate-limit
+- iOS-клиент (SwiftUI) живёт в отдельном репозитории `~/Projects/cogi_ios/`. Он шлёт `X-Device-Id` (UUID в UserDefaults) в каждом запросе — для rate-limit
 
 ### Бэкенд
 
@@ -208,7 +208,7 @@ abc_app/
 └── deploy/                      # gitignored, реальные k8s манифесты хранятся отдельно
 ```
 
-iOS-клиент: отдельный репозиторий `~/Projects/abc_app_ios/`.
+iOS-клиент: отдельный репозиторий `~/Projects/cogi_ios/`.
 
 ## Команды разработки (только бэкенд)
 
@@ -227,11 +227,11 @@ docker compose up
 
 ## iOS-клиент
 
-Нативный SwiftUI-клиент живёт в **отдельном репозитории**: `~/Projects/abc_app_ios/` (не на GitHub — только локально, плюс возможно потом отдельный публичный репо).
+Нативный SwiftUI-клиент живёт в **отдельном репозитории**: `~/Projects/cogi_ios/` (не на GitHub — только локально, плюс возможно потом отдельный публичный репо).
 
 **Стек:** SwiftUI + `@Observable` + `URLSession async/await`, никаких сторонних библиотек. Минимум iOS 17.0, Xcode 16+.
 
-**Архитектура (после pivot 2026-05-14, всё в одном файле `CBTAnalyzer/CBTAnalyzer/ContentView.swift`):**
+**Архитектура (после pivot 2026-05-14, всё в одном файле `Cogi/Cogi/ContentView.swift`):**
 - TabView с тремя вкладками: **Анализ / Сохранено / Настройки**
 - **Анализ** — `Form` с тремя секциями (ситуация, эмоции, мысли), реактивный анализ через `.task(id: AnalysisInput(...))` с debounce 1.5 сек, кнопка **Сохранить** в `.topBarTrailing`
 - **Сохранено** — `List` сохранённых entries с relative-датами, swipe-to-delete (`allowsFullSwipe: false`), `ShareLink` для экспорта всего JSON
