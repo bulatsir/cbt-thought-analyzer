@@ -385,3 +385,143 @@ def build_user_prompt(
     if emotions and emotions.strip():
         prompt += f"\n\nЭмоции и последствия (C): {emotions.strip()}"
     return prompt
+
+
+# ── Подсказка голоса и тем для момента (вкладка «Голоса», iOS) ──
+#
+# Темы — те же 4 эмоциональные темы, что и у мыслей (rawValue из iOS-enum
+# ThoughtTheme). Модель отвечает КЛЮЧАМИ, не локализованными названиями —
+# клиент декодит их напрямую.
+
+THEME_KEYS: tuple[str, ...] = ("selfCriticism", "threat", "loss", "injustice")
+
+_THEME_DESCRIPTIONS_RU: dict[str, str] = {
+    "selfCriticism": "самокритика — «я плохой / ничтожество» (стыд, вина)",
+    "threat": "угроза — «случится плохое» (тревога, страх)",
+    "loss": "потеря — «всё кончено / безнадёжно» (грусть, апатия)",
+    "injustice": "несправедливость — «так нельзя, он не должен» (злость, обида)",
+}
+
+_THEME_DESCRIPTIONS_EN: dict[str, str] = {
+    "selfCriticism": "self-criticism — \"I'm bad / worthless\" (shame, guilt)",
+    "threat": "threat — \"something bad will happen\" (anxiety, fear)",
+    "loss": "loss — \"it's over / hopeless\" (sadness, apathy)",
+    "injustice": "injustice — \"this is wrong, they shouldn't\" (anger, resentment)",
+}
+
+
+def _theme_listing(language: str) -> str:
+    desc = _THEME_DESCRIPTIONS_EN if language == "en" else _THEME_DESCRIPTIONS_RU
+    return "\n".join(f"- {k}: {desc[k]}" for k in THEME_KEYS)
+
+
+def build_suggest_system_prompt(voice_names: list[str], language: str = "ru") -> str:
+    themes = _theme_listing(language)
+    if language == "en":
+        roster = (
+            "\n".join(f"- {n}" for n in voice_names)
+            if voice_names
+            else "(the roster is empty)"
+        )
+        return f"""You help with a self-compassion practice. The person keeps a roster of named "inner voices" (externalized inner critics) and jots down brief moments of distress as free text. Your task: read one moment and suggest which voice is speaking and which emotional themes are present.
+
+Inner voice roster (suggest a name ONLY from this list, verbatim):
+{roster}
+
+Emotional themes (use ONLY these keys in "themes"):
+{themes}
+
+Rules:
+- "voice_name": exactly one name from the roster, or null if no voice clearly fits, the text is too vague, or the roster is empty. When unsure — null. Never invent a name.
+- "themes": 0 to 2 theme KEYS (e.g. "threat"), only when clearly present. Empty array is a normal answer.
+- The text may be raw, fragmented, emotional — that's expected. Gibberish or empty meaning → null and [].
+- Reply ONLY as JSON.
+
+Response format:
+{{"voice_name": "name from roster or null", "themes": ["key"]}}"""
+
+    roster = (
+        "\n".join(f"- {n}" for n in voice_names)
+        if voice_names
+        else "(ростер пуст)"
+    )
+    return f"""Ты помогаешь в практике самосострадания. Человек ведёт ростер именованных «внутренних голосов» (экстернализованные внутренние критики) и записывает короткие моменты дистресса свободным текстом. Твоя задача: прочитать один момент и предположить, какой голос звучит и какие эмоциональные темы присутствуют.
+
+Ростер внутренних голосов (предлагай имя ТОЛЬКО из этого списка, дословно):
+{roster}
+
+Эмоциональные темы (в "themes" используй ТОЛЬКО эти ключи):
+{themes}
+
+Правила:
+- "voice_name": ровно одно имя из ростера, либо null — если ни один голос явно не подходит, текст слишком расплывчатый или ростер пуст. Сомневаешься — null. Никогда не выдумывай имя.
+- "themes": от 0 до 2 КЛЮЧЕЙ тем (например "threat"), только если тема явно присутствует. Пустой массив — нормальный ответ.
+- Текст может быть сырым, обрывочным, эмоциональным — это ожидаемо. Бессмыслица или пустой смысл → null и [].
+- Отвечай ТОЛЬКО в формате JSON.
+
+Формат ответа:
+{{"voice_name": "имя из ростера или null", "themes": ["ключ"]}}"""
+
+
+def build_suggest_user_prompt(text: str) -> str:
+    return f'Запись момента: "{text.strip()}"'
+
+
+# ── Обзор недели (синтез паттернов по моментам) ──
+
+
+def build_review_system_prompt(language: str = "ru") -> str:
+    if language == "en":
+        return """You help with a self-compassion practice. The person has been jotting down brief moments of distress (free text, sometimes with a named "inner voice" and emotional themes attached). You receive their recent moments and write a short, warm review of patterns.
+
+Rules:
+- Note which voices and themes recur, and in what situations or times they tend to show up. Ground every observation in the actual entries — do not invent patterns.
+- Tone: warm, even, side-by-side — like a kind friend reflecting back what they noticed. Address the person as "you".
+- End with ONE gentle observation or question to sit with. Not advice, not homework.
+- Do NOT: diagnose, suggest therapy or treatment, evaluate the person, praise or scold, use clinical jargon, use the words "patient"/"client"/"user".
+- If there are too few entries to see a pattern, say so honestly and warmly instead of forcing one.
+- Length: 120–200 words, plain text (no markdown headings or lists).
+- Reply ONLY as JSON.
+
+Response format:
+{"review": "the review text"}"""
+
+    return """Ты помогаешь в практике самосострадания. Человек записывает короткие моменты дистресса (свободный текст, иногда с именованным «внутренним голосом» и эмоциональными темами). Ты получаешь его недавние записи и пишешь короткий тёплый обзор паттернов.
+
+Правила:
+- Отметь, какие голоса и темы повторяются и в каких ситуациях или в какое время они обычно всплывают. Каждое наблюдение опирай на реальные записи — не выдумывай паттерны.
+- Тон: тёплый, ровный, «рядом, а не сверху» — как добрый друг, который отражает то, что заметил. Обращайся на «ты».
+- Закончи ОДНИМ мягким наблюдением или вопросом, с которым можно побыть. Не советом, не домашним заданием.
+- НЕЛЬЗЯ: ставить диагнозы, советовать терапию или лечение, оценивать человека, хвалить или ругать, использовать клинический жаргон, использовать слова «пациент», «клиент», «пользователь».
+- Если записей слишком мало, чтобы увидеть паттерн, — честно и тепло скажи об этом, не натягивай.
+- Объём: 120–200 слов, простой текст (без markdown-заголовков и списков).
+- Отвечай ТОЛЬКО на русском языке и ТОЛЬКО в формате JSON.
+
+Формат ответа:
+{"review": "текст обзора"}"""
+
+
+def build_review_user_prompt(
+    moments: list[tuple[str, list[str], list[str], str]],
+    language: str = "ru",
+) -> str:
+    """moments: (text, voices, themes, date) — already validated upstream."""
+    if language == "en":
+        header = "Recent moments (oldest first):"
+        empty_text = "(no text)"
+        voices_label, themes_label = "voices", "themes"
+    else:
+        header = "Недавние моменты (от старых к новым):"
+        empty_text = "(без текста)"
+        voices_label, themes_label = "голоса", "темы"
+
+    lines = [header]
+    for text, voices, themes, date in moments:
+        parts = [f"[{date}]"]
+        parts.append(f'"{text.strip()}"' if text.strip() else empty_text)
+        if voices:
+            parts.append(f"{voices_label}: {', '.join(voices)}")
+        if themes:
+            parts.append(f"{themes_label}: {', '.join(themes)}")
+        lines.append("- " + " — ".join(parts))
+    return "\n".join(lines)

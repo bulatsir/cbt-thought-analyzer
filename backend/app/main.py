@@ -7,7 +7,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.groq_client import GroqClient
 from app.rate_limit import InMemoryRateLimiter
-from app.schemas import AnalyzeRequest, AnalyzeResponse
+from app.schemas import (
+    AnalyzeRequest,
+    AnalyzeResponse,
+    ReviewRequest,
+    ReviewResponse,
+    SuggestRequest,
+    SuggestResponse,
+)
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO"),
@@ -69,3 +76,21 @@ async def analyze(
     _: str = Depends(rate_limit),
 ) -> AnalyzeResponse:
     return await groq.analyze(body)
+
+
+@app.post("/suggest", response_model=SuggestResponse)
+async def suggest(
+    body: SuggestRequest,
+    groq: GroqClient = Depends(get_groq),
+    _: str = Depends(rate_limit),
+) -> SuggestResponse:
+    return await groq.suggest(body)
+
+
+@app.post("/review", response_model=ReviewResponse)
+async def review(
+    body: ReviewRequest,
+    groq: GroqClient = Depends(get_groq),
+    _: str = Depends(rate_limit),
+) -> ReviewResponse:
+    return await groq.review(body)

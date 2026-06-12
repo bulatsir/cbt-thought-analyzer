@@ -9,6 +9,11 @@ from fastapi import HTTPException
 from app.prompts import (
     DISTORTIONS,
     DISTORTIONS_EN,
+    THEME_KEYS,
+    build_review_system_prompt,
+    build_review_user_prompt,
+    build_suggest_system_prompt,
+    build_suggest_user_prompt,
     build_system_prompt,
     build_user_prompt,
 )
@@ -16,6 +21,10 @@ from app.schemas import (
     AnalyzeRequest,
     AnalyzeResponse,
     Distortion,
+    ReviewRequest,
+    ReviewResponse,
+    SuggestRequest,
+    SuggestResponse,
 )
 
 _CANONICAL_NAMES_BY_LANG: dict[str, set[str]] = {
@@ -26,8 +35,18 @@ _CANONICAL_NAMES_BY_LANG: dict[str, set[str]] = {
 logger = logging.getLogger(__name__)
 
 UPSTREAM_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL = "meta-llama/llama-3.3-70b-instruct"
-TIMEOUT_SECONDS = 20.0
+MODEL = "anthropic/claude-sonnet-4.6"
+TIMEOUT_SECONDS = 30.0
+
+
+def _strip_fences(content: str) -> str:
+    """Claude occasionally wraps JSON in a ```json fence despite
+    response_format — cut from the first '{' to the last '}'."""
+    start = content.find("{")
+    end = content.rfind("}")
+    if start != -1 and end > start:
+        return content[start : end + 1]
+    return content
 
 
 class GroqClient:
@@ -65,7 +84,6 @@ class GroqClient:
                     "response_format": {"type": "json_object"},
                     "temperature": 0.3,
                     "max_tokens": max_tokens,
-                    "provider": {"order": ["groq", "sambanova-turbo"], "allow_fallbacks": True},
                 },
             )
         except httpx.TimeoutException as e:
@@ -133,9 +151,9 @@ class GroqClient:
             raise HTTPException(status_code=502, detail="Empty response from upstream")
 
         try:
-            return json.loads(content)
+            return json.loads(_strip_fences(content))
         except json.JSONDecodeError:
-            logger.warning("Non-JSON from Groq: %s", content[:200])
+            logger.warning("Non-JSON from upstream: %s", content[:200])
             raise HTTPException(status_code=502, detail="Invalid JSON from upstream")
 
     async def analyze(self, req: AnalyzeRequest) -> AnalyzeResponse:
@@ -173,3 +191,45 @@ class GroqClient:
                 dropped,
             )
         return AnalyzeResponse(distortions=distortions)
+
+    async def suggest(self, req: SuggestRequest) -> SuggestResponse:
+        parsed = await self._call(
+            build_suggest_system_prompt(req.voice_names, req.language),
+            build_suggest_user_prompt(req.text),
+            max_tokens=256,
+        )
+
+        # Hard-filter: voice must come from the request's roster, themes from
+        # the canonical key list — same contract pattern as /analyze.
+        voice_name = parsed.get("voice_name")
+        if not isinstance(voice_name, str) or voice_name not in set(req.voice_names):
+            if voice_name is not None and voice_name != "null":
+                logger.warning("suggest dropped non-roster voice: %r", voice_name)
+            voice_name = None
+
+        raw_themes = parsed.get("themes", [])
+        if not isinstance(raw_themes, list):
+            raw_themes = []
+        themes: list[str] = []
+        for t in raw_themes[:2]:
+            if isinstance(t, str) and t in THEME_KEYS and t not in themes:
+                themes.append(t)
+            elif isinstance(t, str):
+                logger.warning("suggest dropped non-canonical theme: %r", t)
+
+        return SuggestResponse(voice_name=voice_name, themes=themes)
+
+    async def review(self, req: ReviewRequest) -> ReviewResponse:
+        parsed = await self._call(
+            build_review_system_prompt(req.language),
+            build_review_user_prompt(
+                [(m.text, m.voices, m.themes, m.date) for m in req.moments],
+                req.language,
+            ),
+            max_tokens=1024,
+        )
+        review = parsed.get("review")
+        if not isinstance(review, str) or not review.strip():
+            logger.warning("review returned empty/invalid text: %s", str(parsed)[:200])
+            raise HTTPException(status_code=502, detail="Empty review from upstream")
+        return ReviewResponse(review=review.strip())
