@@ -8,7 +8,7 @@ CBT Thought Analyzer — десктопное приложение для раз
 - **B** (Beliefs) — автоматические мысли, убеждения
 - **C** (Consequences) — последствия: эмоции и поведение
 
-Приложение помогает пользователю записать свои мысли и автоматически определяет когнитивные искажения с помощью AI (Llama 3.3 70B через OpenRouter с маршрутизацией на Groq/SambaNova-Turbo). Запросы идут через собственный FastAPI-бэкенд — API-ключ хранится на сервере, фронт его не видит.
+Приложение помогает пользователю записать свои мысли и автоматически определяет когнитивные искажения с помощью AI (Claude Sonnet 4.6 через OpenRouter; до бэкенда v0.2.0 была Llama 3.3 70B/Groq). Запросы идут через собственный FastAPI-бэкенд — API-ключ хранится на сервере, фронт его не видит.
 
 ## UX-концепция
 
@@ -74,7 +74,7 @@ CBT Thought Analyzer — десктопное приложение для раз
 - **pydantic** — валидация запросов/ответов, авто-OpenAPI
 - Ключ Groq в env (`GROQ_API_KEY`), в k8s — через Secret
 - Rate-limit по `X-Device-Id` (in-memory sliding window, 30/мин по умолчанию)
-- Эндпоинты: `/analyze`, `/health`
+- Эндпоинты: `/analyze`, `/suggest` (подсказка голоса+тем для момента из вкладки Голоса), `/review` (обзор недели по моментам), `/health`
 - Промпты живут на бэке (`backend/app/prompts.py`) — можно править без передеплоя фронта
 
 ### Деплой
@@ -87,7 +87,7 @@ CBT Thought Analyzer — десктопное приложение для раз
 
 ### Модель
 
-`meta-llama/llama-3.3-70b-instruct` через OpenRouter с провайдер-preference `[groq, sambanova-turbo]` и включёнными fallbacks. Среднее время `/analyze` ~1 сек, цена ~$0.00004 за вызов (см. https://openrouter.ai/meta-llama/llama-3.3-70b-instruct). Менять в `backend/app/groq_client.py` (константы `UPSTREAM_URL`, `MODEL` и блок `provider` в body).
+`anthropic/claude-sonnet-4.6` через OpenRouter (с бэкенда v0.2.0, 2026-06-12; раньше — Llama 3.3 70B с роутингом на Groq). Среднее время `/analyze` ~3–6 сек, цена $3/$15 за MTok (~$5/мес на текущем профиле). Менять в `backend/app/groq_client.py` (константы `UPSTREAM_URL`, `MODEL`). Перед `json.loads` контент проходит `_strip_fences` — Claude изредка оборачивает JSON в markdown-фенс.
 
 ### Подход
 
@@ -104,7 +104,7 @@ CBT Thought Analyzer — десктопное приложение для раз
 Промпт принимает параметр `language` (`"ru"` или `"en"`):
 - RU-режим — и `name`, и `explanation` на русском (канонические имена из `DISTORTIONS`)
 - EN-режим — и `name`, и `explanation` на английском (канонические имена из `DISTORTIONS_EN`, тот же порядок что `DISTORTIONS`)
-- Server-side в `groq_client.analyze()` фильтрует имена не из канонического списка **для запрошенного языка** (`_CANONICAL_NAMES_BY_LANG`) и логирует drop на WARN — защита от того что Llama 3.3 70B иногда дрейфует (например отдаёт RU-имя в EN-режиме)
+- Server-side в `groq_client.analyze()` фильтрует имена не из канонического списка **для запрошенного языка** (`_CANONICAL_NAMES_BY_LANG`) и логирует drop на WARN — защита от дрейфа модели (например RU-имя в EN-режиме). Тот же паттерн в `suggest()`: голос только из присланного ростера, темы только из `THEME_KEYS`
 - iOS-клиент рендерит `distortion.name` напрямую — никакого RU→EN маппинга на клиенте больше нет (был `DistortionDisplayName`, удалён в v0.1.7: имя уже приходит на нужном языке)
 
 Текущий полный текст системного промпта (актуальная версия `backend/app/prompts.py:build_system_prompt`):
