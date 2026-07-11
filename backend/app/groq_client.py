@@ -38,6 +38,12 @@ UPSTREAM_URL = "https://openrouter.ai/api/v1/chat/completions"
 MODEL = "anthropic/claude-sonnet-4.6"
 TIMEOUT_SECONDS = 30.0
 
+# Speech-to-text (voice-to-text). OpenAI gpt-4o-transcribe: best Russian
+# transcription with punctuation, ~$0.006/min. Same OpenRouter key.
+TRANSCRIBE_URL = "https://openrouter.ai/api/v1/audio/transcriptions"
+TRANSCRIBE_MODEL = "openai/gpt-4o-transcribe"
+TRANSCRIBE_TIMEOUT_SECONDS = 60.0
+
 
 def _strip_fences(content: str) -> str:
     """Claude occasionally wraps JSON in a ```json fence despite
@@ -47,6 +53,45 @@ def _strip_fences(content: str) -> str:
     if start != -1 and end > start:
         return content[start : end + 1]
     return content
+
+
+def _raise_for_upstream(status: int, data: Any, text: str) -> None:
+    """Map an OpenRouter error response to an HTTPException, or return if OK.
+
+    OpenRouter (and the providers behind it) report errors as a JSON
+    {"error": {"code", "message"}} object — sometimes even with HTTP 200,
+    when a provider fails after accepting the request. So treat a present
+    "error" key as failure regardless of status."""
+    err = data.get("error") if isinstance(data, dict) else None
+    if err is None and status < 400:
+        return
+    err = err if isinstance(err, dict) else {}
+    code = err.get("code", status)
+    message = err.get("message") or text[:300]
+    blob = f"{code} {message}".lower()
+    # Groq returns "invalid_api_key" (not 403) when the key is scoped or its
+    # Allowed Models list excludes the model — looks like a generic upstream
+    # failure unless we name it. See memory: groq_key_scope_gotcha.
+    is_auth = (
+        status in (401, 403)
+        or code in (401, 403)
+        or "invalid_api_key" in blob
+        or "invalid api key" in blob
+    )
+    if is_auth:
+        logger.error(
+            "Upstream auth failure (status=%s code=%s): %s — check "
+            "GROQ_API_KEY scope / Allowed Models",
+            status,
+            code,
+            message,
+        )
+        raise HTTPException(status_code=500, detail="Upstream auth failure")
+    if status == 429 or code == 429:
+        logger.warning("Upstream rate-limited: %s", message)
+        raise HTTPException(status_code=429, detail="Upstream rate-limited")
+    logger.error("Upstream error (status=%s code=%s): %s", status, code, message)
+    raise HTTPException(status_code=502, detail="Upstream error")
 
 
 class GroqClient:
@@ -103,40 +148,7 @@ class GroqClient:
         except (json.JSONDecodeError, ValueError):
             data = None
 
-        status = response.status_code
-        err = data.get("error") if isinstance(data, dict) else None
-
-        if err is not None or status >= 400:
-            err = err if isinstance(err, dict) else {}
-            code = err.get("code", status)
-            message = err.get("message") or response.text[:300]
-            blob = f"{code} {message}".lower()
-            # Groq returns "invalid_api_key" (not 403) when the key is scoped
-            # or its Allowed Models list excludes this model — looks like a
-            # generic upstream failure unless we name it. See memory:
-            # groq_key_scope_gotcha.
-            is_auth = (
-                status in (401, 403)
-                or code in (401, 403)
-                or "invalid_api_key" in blob
-                or "invalid api key" in blob
-            )
-            if is_auth:
-                logger.error(
-                    "Upstream auth failure (status=%s code=%s): %s — check "
-                    "GROQ_API_KEY scope / Allowed Models",
-                    status,
-                    code,
-                    message,
-                )
-                raise HTTPException(status_code=500, detail="Upstream auth failure")
-            if status == 429 or code == 429:
-                logger.warning("Upstream rate-limited: %s", message)
-                raise HTTPException(status_code=429, detail="Upstream rate-limited")
-            logger.error(
-                "Upstream error (status=%s code=%s): %s", status, code, message
-            )
-            raise HTTPException(status_code=502, detail="Upstream error")
+        _raise_for_upstream(response.status_code, data, response.text)
 
         if not isinstance(data, dict):
             logger.warning("Non-JSON from upstream: %s", response.text[:200])
@@ -233,3 +245,47 @@ class GroqClient:
             logger.warning("review returned empty/invalid text: %s", str(parsed)[:200])
             raise HTTPException(status_code=502, detail="Empty review from upstream")
         return ReviewResponse(review=review.strip())
+
+    async def transcribe(
+        self,
+        audio: bytes,
+        filename: str,
+        content_type: str,
+        language: str,
+    ) -> str:
+        """Speech-to-text via OpenRouter's transcription API (multipart).
+        Returns the transcript text; maps upstream failures to HTTPException."""
+        try:
+            response = await self._client.post(
+                TRANSCRIBE_URL,
+                files={"file": (filename, audio, content_type)},
+                data={
+                    "model": TRANSCRIBE_MODEL,
+                    "language": language,
+                    "response_format": "json",
+                },
+                timeout=TRANSCRIBE_TIMEOUT_SECONDS,
+            )
+        except httpx.TimeoutException as e:
+            logger.warning("Transcribe timeout: %s", e)
+            raise HTTPException(status_code=504, detail="Upstream timeout")
+        except httpx.HTTPError as e:
+            logger.exception("Transcribe request failed")
+            raise HTTPException(status_code=502, detail="Upstream unavailable") from e
+
+        try:
+            data = response.json()
+        except (json.JSONDecodeError, ValueError):
+            data = None
+
+        _raise_for_upstream(response.status_code, data, response.text)
+
+        if not isinstance(data, dict):
+            logger.warning("Non-JSON from transcribe upstream: %s", response.text[:200])
+            raise HTTPException(status_code=502, detail="Invalid response from upstream")
+
+        text = data.get("text")
+        if not isinstance(text, str) or not text.strip():
+            logger.warning("Transcribe returned no text: %s", str(data)[:200])
+            raise HTTPException(status_code=502, detail="Empty transcription from upstream")
+        return text.strip()

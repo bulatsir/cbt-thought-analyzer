@@ -2,7 +2,16 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.groq_client import GroqClient
@@ -14,7 +23,11 @@ from app.schemas import (
     ReviewResponse,
     SuggestRequest,
     SuggestResponse,
+    TranscribeResponse,
 )
+
+# OpenAI/Whisper upload ceiling; also bounds memory per request.
+MAX_AUDIO_BYTES = 25 * 1024 * 1024
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO"),
@@ -94,3 +107,27 @@ async def review(
     _: str = Depends(rate_limit),
 ) -> ReviewResponse:
     return await groq.review(body)
+
+
+@app.post("/transcribe", response_model=TranscribeResponse)
+async def transcribe(
+    file: UploadFile = File(...),
+    language: str = Form("ru"),
+    groq: GroqClient = Depends(get_groq),
+    _: str = Depends(rate_limit),
+) -> TranscribeResponse:
+    if file.size is not None and file.size > MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="Audio too large")
+    audio = await file.read()
+    if not audio:
+        raise HTTPException(status_code=400, detail="Empty audio")
+    if len(audio) > MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="Audio too large")
+    lang = language if language in ("ru", "en") else "ru"
+    text = await groq.transcribe(
+        audio,
+        file.filename or "audio.m4a",
+        file.content_type or "audio/m4a",
+        lang,
+    )
+    return TranscribeResponse(text=text)

@@ -46,3 +46,7 @@ class ReviewRequest(BaseModel):
 
 class ReviewResponse(BaseModel):
     review: str
+
+
+class TranscribeResponse(BaseModel):
+    text: str
