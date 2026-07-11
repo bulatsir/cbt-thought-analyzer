@@ -138,11 +138,8 @@ class GroqClient:
             logger.exception("Groq request failed")
             raise HTTPException(status_code=502, detail="Upstream unavailable") from e
 
-        # Parse the body once. OpenRouter (and the providers behind it) report
-        # errors as a JSON {"error": {"code", "message"}} object — sometimes
-        # even with HTTP 200, when a provider fails after accepting the
-        # request. So treat a present "error" key as failure regardless of
-        # status, and always surface the upstream message in logs.
+        # Parse the body once; _raise_for_upstream inspects it for an "error"
+        # key even on HTTP 200 (providers can fail after accepting the request).
         try:
             data = response.json()
         except (json.JSONDecodeError, ValueError):
@@ -285,7 +282,9 @@ class GroqClient:
             raise HTTPException(status_code=502, detail="Invalid response from upstream")
 
         text = data.get("text")
-        if not isinstance(text, str) or not text.strip():
-            logger.warning("Transcribe returned no text: %s", str(data)[:200])
-            raise HTTPException(status_code=502, detail="Empty transcription from upstream")
+        if not isinstance(text, str):
+            logger.warning("Transcribe returned no text field: %s", str(data)[:200])
+            raise HTTPException(status_code=502, detail="Invalid transcription from upstream")
+        # Empty text = silence / no speech, NOT an upstream failure — return it
+        # (200) and let the client no-op. Only a missing/!str field is a 502.
         return text.strip()
