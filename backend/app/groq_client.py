@@ -287,7 +287,13 @@ class GroqClient:
     async def analyze(self, req: AnalyzeRequest) -> AnalyzeResponse:
         reply = await self._call(
             build_system_prompt(req.language),
-            build_user_prompt(req.thought, req.situation, req.emotions),
+            build_user_prompt(
+                req.thought,
+                req.situation,
+                req.emotions,
+                preceding=req.preceding,
+                language=req.language,
+            ),
             schema=build_analyze_schema(req.language),
             model=_resolve_model(req.model),
             # 2048, не 512: пояснения v2 называют, на чём мысль стоит и чего в ней

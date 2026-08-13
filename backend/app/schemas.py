@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -13,6 +13,13 @@ class AnalyzeRequest(BaseModel):
     situation: str | None = Field(default=None, max_length=2000)
     emotions: str | None = Field(default=None, max_length=2000)
     language: Literal["ru", "en"] = "ru"
+    # Предыдущие звенья «техники стрелки», от первого к последнему. Без них
+    # глубокое звено («значит я никому не нужен») уезжает на разбор обрывком:
+    # модель не знает, что это ответ на «и что с того?» к предыдущей мысли, и
+    # ставит метки беднее. Пусто — обычная одиночная мысль, поведение прежнее.
+    preceding: list[Annotated[str, Field(max_length=2000)]] = Field(
+        default_factory=list, max_length=8
+    )
     # Необязательный выбор модели. Проверяется по ALLOWED_MODELS в groq_client:
     # строку из запроса в апстрим не пускаем. Не из списка → тихий откат на
     # дефолт, а не ошибка (см. _resolve_model).

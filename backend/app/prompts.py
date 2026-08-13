@@ -467,8 +467,40 @@ def build_user_prompt(
     thought: str,
     situation: str | None = None,
     emotions: str | None = None,
+    preceding: list[str] | None = None,
+    language: str = "ru",
 ) -> str:
     prompt = f'Автоматическая мысль: "{thought}"'
+
+    # Блок цепочки добавляется ТОЛЬКО когда звенья реально есть — обычный
+    # одиночный разбор должен получить ровно тот промпт, что и раньше.
+    #
+    # Инструкция живёт здесь, а не в системном промпте, намеренно: системный
+    # вылизан под одиночную мысль и содержит «не придумывай обстоятельств,
+    # которых нет во вводе». Отдельная строка в system про цепочки висела бы
+    # на каждом запросе, включая те, где никакой цепочки нет.
+    links = [t.strip() for t in (preceding or []) if t and t.strip()]
+    if links:
+        listing = "\n".join(f'{i + 1}. "{t}"' for i, t in enumerate(links))
+        if language == "en":
+            prompt += (
+                "\n\nPreceding links of a downward-arrow chain, first to last:\n"
+                f"{listing}\n"
+                "The automatic thought above is the answer to \"And so what? What's so "
+                "terrible about that?\" asked about the last link. Analyse ONLY that "
+                "thought; the chain is context, not a separate task. The chain is part "
+                "of the input, not an assumption — you may rely on it."
+            )
+        else:
+            prompt += (
+                "\n\nПредыдущие звенья цепочки (техника стрелки), от первого к последнему:\n"
+                f"{listing}\n"
+                "Автоматическая мысль выше — ответ на вопрос «И что с того? Что в этом "
+                "ужасного?», заданный к последнему звену. Разбирай ТОЛЬКО её; цепочка "
+                "нужна как контекст, а не как отдельная задача. Цепочка — часть ввода, "
+                "а не домысел, на неё можно опираться."
+            )
+
     if situation and situation.strip():
         prompt += f"\n\nКонтекст ситуации (A): {situation.strip()}"
     if emotions and emotions.strip():
