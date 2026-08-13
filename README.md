@@ -4,7 +4,7 @@ FastAPI service that detects cognitive distortions in automatic thoughts using a
 
 ## Stack
 
-FastAPI · httpx async · pydantic · Llama 3.3 70B via [OpenRouter](https://openrouter.ai) (providers `[groq, sambanova-turbo]`, fallbacks on) · in-memory rate limiter keyed by `X-Device-Id` (30 req/min). Docker image, k8s-friendly.
+FastAPI · httpx async · pydantic · Claude Sonnet 5 via [OpenRouter](https://openrouter.ai) · in-memory rate limiter keyed by `X-Device-Id` (30 req/min). Docker image, k8s-friendly.
 
 ## API
 
@@ -29,7 +29,10 @@ curl -X POST http://localhost:8000/analyze \
 - `language` — `"ru"` (default) or `"en"`; both `name` and `explanation` come back in that language
 - Names are picked from a fixed list in `backend/app/prompts.py` — non-canonical replies from the model are dropped server-side
 - Gibberish input (`"asdf"`, `"zzz"`, …) → empty `distortions` array
+- `POST /beliefs` — core-belief hypotheses across a person's saved analyses (10 entries minimum), each grounded in verbatim quotes from their own entries
+- `POST /transcribe` — speech-to-text (multipart audio)
 - Other endpoints: `GET /health`, Swagger at `/docs`
+- `POST /suggest` and `POST /review` still exist but currently have no client (the iOS Voices tab was removed)
 
 ## Run locally
 
