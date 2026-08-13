@@ -31,6 +31,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# Local Claude Code config + personal skills (this is a public repo)
+.claude/
+
 # Logs
 *.log
 npm-debug.log*
