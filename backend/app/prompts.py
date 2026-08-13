@@ -70,6 +70,14 @@ _NEGATIVE_EXAMPLES: tuple[tuple[str, str], ...] = (
 # (ru_input, en_input, ((idx, ru_explanation, en_explanation), ...))
 # Multi-label examples give each distortion its OWN focused explanation —
 # never the same string twice.
+#
+# Explanation shape (v2, 2026-08-09): each explanation must name what the
+# thought *treats as evidence* and what it *leaves unchecked* — never restate
+# the distortion's definition. Restating ("приписывание чужих мыслей без
+# проверки") reads as an explanation but carries no information about this
+# particular thought, and 13 of 15 👎 verdicts in the first 2.5 months of real
+# use were exactly that. Test for a bad explanation: delete the quote — if what
+# remains fits any other thought with the same label, rewrite it.
 _POSITIVE_EXAMPLES: tuple[
     tuple[str, str, tuple[tuple[int, str, str], ...]], ...
 ] = (
@@ -79,13 +87,13 @@ _POSITIVE_EXAMPLES: tuple[
         (
             (
                 1,
-                "Слово «никуда» раздувает один отказ до бесконечного правила: одна неудача приравнена к «так будет всегда».",
-                'The word "ever" inflates a single rejection into an endless rule: one failure is equated with "it will always be like this".',
+                "Одно собеседование взято как выборка, по которой уже можно судить обо всех остальных: «никуда» охватывает и тех работодателей, с которыми разговора ещё не было.",
+                'A single interview is treated as a sample big enough to judge all the others: "anywhere" covers employers there has not even been a conversation with yet.',
             ),
             (
                 5,
-                "«Не возьмут» подаёт ещё не случившееся будущее как уже решённый факт.",
-                '"Nobody will hire me" states an unhappened future as an already-settled fact.',
+                "«Не возьмут» — прогноз, у которого единственное основание — один уже прошедший отказ; ни одного ответа на будущие отклики ещё не приходило.",
+                '"Nobody will hire me" is a forecast whose only basis is one rejection that already happened; no answer to any future application has come in yet.',
             ),
         ),
     ),
@@ -95,8 +103,8 @@ _POSITIVE_EXAMPLES: tuple[
         (
             (
                 4,
-                "«Считает меня никчёмным» — приписывание чужих мыслей без проверки: молчание истолковано как доказательство негативного отношения.",
-                '"He thinks I\'m worthless" attributes thoughts to someone else without checking: silence is read as proof of a negative attitude.',
+                "Всё основание здесь — что человек не поздоровался; из этого достраивается конкретная формулировка у него в голове, хотя спешка или невнимательность объясняют молчание не хуже.",
+                'The whole basis here is that he didn\'t say hi; from that, a specific verdict inside his head is reconstructed — though being in a hurry or simply not noticing explains the silence just as well.',
             ),
         ),
     ),
@@ -106,8 +114,8 @@ _POSITIVE_EXAMPLES: tuple[
         (
             (
                 10,
-                "«Полное ничтожество» — фиксированный ярлык на всю личность вместо описания конкретной ситуации; человек приравнивается к одной оценке.",
-                '"A complete nobody" is a fixed label on the whole person instead of describing a specific situation; a person is equated with a single judgment.',
+                "«Полное ничтожество» подводит итог человеку целиком, не называя ни одного конкретного поступка, к которому этот итог можно было бы отнести и проверить.",
+                '"A complete nobody" sums up the whole person without naming a single concrete action the verdict could be attached to and checked against.',
             ),
         ),
     ),
@@ -117,8 +125,8 @@ _POSITIVE_EXAMPLES: tuple[
         (
             (
                 13,
-                "Планка «идеально» задаёт недостижимый стандарт, при котором любой результат ниже совершенства не имеет ценности.",
-                'The bar "perfectly" sets an unreachable standard under which any result short of flawless has no value.',
+                "Ценность работы измеряется единственной отметкой «идеально», а промежуточный исход — сделать частично, сделать неплохо — заранее выведен из списка вариантов.",
+                'The work\'s worth is measured against the single mark "perfectly", while the in-between outcome — doing part of it, doing it decently — is removed from the list of options in advance.',
             ),
         ),
     ),
@@ -128,8 +136,8 @@ _POSITIVE_EXAMPLES: tuple[
         (
             (
                 0,
-                "«Либо… либо… полный провал» — только две крайние корзины без промежуточных оценок; середина исключена.",
-                '"Either... or... a total failure" allows only two extreme buckets with nothing in between; the middle ground is excluded.',
+                "Между «всё получилось» и «полный провал» не оставлено места исходу «часть вышла, часть нет», хотя именно туда попадает большинство результатов.",
+                'Between "everything worked out" and "a total failure" no room is left for "some of it worked, some didn\'t" — which is where most results actually land.',
             ),
         ),
     ),
@@ -139,8 +147,8 @@ _POSITIVE_EXAMPLES: tuple[
         (
             (
                 2,
-                "Одна деталь — «одно замечание» — заслоняет весь день: внимание застряло на единственном негативе, остальное не учитывается.",
-                'One detail — "one piece of criticism" — overshadows the whole day: attention is stuck on a single negative while everything else is ignored.',
+                "Оценка целого дня построена на одном замечании; всё остальное, что за этот день происходило, в подсчёт просто не попало.",
+                'The verdict on an entire day rests on one piece of criticism; everything else that happened that day never entered the count.',
             ),
         ),
     ),
@@ -150,8 +158,8 @@ _POSITIVE_EXAMPLES: tuple[
         (
             (
                 12,
-                "«Вообще нет ничего хорошего» — обзор сужен до одной негативной стороны, любые плюсы заранее не попадают в поле зрения.",
-                '"Nothing good at all" narrows the view to a single negative side; any positives never enter the field of view.',
+                "«Вообще ничего» — вывод обо всей работе, при котором не названо ни одной её стороны, кроме той, что сейчас в фокусе.",
+                '"Nothing at all" is a verdict on the entire job that names not one of its sides except the one currently in focus.',
             ),
         ),
     ),
@@ -161,8 +169,8 @@ _POSITIVE_EXAMPLES: tuple[
         (
             (
                 3,
-                "«Это не считается» активно аннулирует реальную похвалу, объясняя её вежливостью, — положительное переводится в ноль.",
-                '"It doesn\'t count" actively nullifies real praise by explaining it away as politeness — the positive is reduced to zero.',
+                "Похвала объясняется вежливостью — догадкой о чужом мотиве, которую никто не проверял, и именно эта догадка позволяет вычесть похвалу из результата.",
+                'The praise is explained away as politeness — a guess about someone else\'s motive that nobody verified, and it is that guess which lets the praise be subtracted from the result.',
             ),
         ),
     ),
@@ -172,8 +180,8 @@ _POSITIVE_EXAMPLES: tuple[
         (
             (
                 7,
-                "Достижение признаётся, но «ерунда, любой может» сжимает его до незначительного — масштаб собственного результата занижен.",
-                'The achievement is acknowledged, but "no big deal, anyone could" shrinks it to trivial — the scale of one\'s own result is downplayed.',
+                "«Любой может» — допущение, а не наблюдение: оно не опирается ни на какие сведения о других людях, но именно им обнуляется собственный результат.",
+                '"Anyone could" is an assumption, not an observation: it rests on no information about other people, yet it is what reduces one\'s own result to nothing.',
             ),
         ),
     ),
@@ -183,8 +191,8 @@ _POSITIVE_EXAMPLES: tuple[
         (
             (
                 8,
-                "Связка «страшно — значит случится» выводит факт из чувства: эмоция принимается за доказательство реальности.",
-                'The link "scared, so it will happen" derives a fact from a feeling: emotion is taken as proof of reality.',
+                "Единственный довод в пользу «случится» — собственный страх; никакого внешнего признака, что событие приближается, в мысли не названо.",
+                'The only argument for "it will happen" is one\'s own fear; the thought names no external sign that the event is actually approaching.',
             ),
         ),
     ),
@@ -194,13 +202,13 @@ _POSITIVE_EXAMPLES: tuple[
         (
             (
                 6,
-                "«Всё рухнет» разгоняет возможную ошибку до предельной катастрофы — худший исход подаётся как масштаб всей жизни.",
-                '"Everything will collapse" escalates a possible mistake into an ultimate catastrophe — the worst case is presented as the scale of one\'s whole life.',
+                "Цепочка обрывается на худшем звене — «всё рухнет», — минуя всё, что обычно стоит между ошибкой и крахом: возможность заметить, исправить, договориться, найти другое место.",
+                'The chain stops at its worst link — "everything will collapse" — skipping everything that normally sits between a mistake and ruin: noticing it, fixing it, talking it through, finding another job.',
             ),
             (
                 5,
-                "Цепочка «ошибусь → уволят» подаётся как неизбежный прогноз, а не как одна из возможностей.",
-                'The chain "make a mistake → get fired" is presented as an inevitable prediction rather than one of several possibilities.',
+                "«Ошибусь → уволят» подан как единственный ход событий, хотя за рабочей ошибкой обычно следует разговор или правка, и как решат в этот раз — пока неизвестно.",
+                '"Make a mistake → get fired" is presented as the only way events can run, though a work mistake is usually followed by a conversation or a correction — and what will be decided this time is not yet known.',
             ),
         ),
     ),
@@ -210,8 +218,8 @@ _POSITIVE_EXAMPLES: tuple[
         (
             (
                 9,
-                "«Никогда не должен» — жёсткое абсолютное требование к себе вместо гибкого предпочтения; ошибка превращается из обычного события в недопустимое нарушение правила.",
-                '"Must never" is a rigid absolute demand on oneself instead of a flexible preference; a mistake turns from an ordinary event into an inadmissible rule violation.',
+                "«Никогда не должен» — правило без исключений и без автора: не сказано, кем оно установлено и что происходит при нарушении, а нарушено оно будет обязательно.",
+                '"Must never" is a rule with no exceptions and no author: it is not said who set it or what happens when it is broken — and broken it certainly will be.',
             ),
         ),
     ),
@@ -221,8 +229,8 @@ _POSITIVE_EXAMPLES: tuple[
         (
             (
                 11,
-                "«Всё из-за меня» берёт единоличную вину за общий результат, который зависел не только от одного человека.",
-                '"All because of me" takes sole blame for a shared outcome that did not depend on one person alone.',
+                "Из всего, что влияло на срок — объём работы, состав команды, внешние задержки, — в объяснении оставлен один человек, и вся причина сведена к нему.",
+                'Of everything that affected the deadline — the scope, the team, outside delays — the explanation keeps one person, and the entire cause is reduced to them.',
             ),
         ),
     ),
@@ -232,13 +240,13 @@ _POSITIVE_EXAMPLES: tuple[
         (
             (
                 14,
-                "Мерило «на их фоне» оценивает собственную ценность через сравнение с другими.",
-                'The yardstick "next to them" judges one\'s own worth through comparison with others.',
+                "«Все ровесники» — обобщение по той части чужих жизней, которая видна снаружи; собственная ценность выводится из этого сопоставления, а не из чего-либо своего.",
+                '"All my peers" generalizes from the part of other people\'s lives that is visible from outside; one\'s own worth is derived from that comparison rather than from anything of one\'s own.',
             ),
             (
                 10,
-                "«Пустое место» закрепляет это фиксированным ярлыком на всю личность.",
-                '"A nobody" locks that in as a fixed label on the whole person.',
+                "«Пустое место» переводит исход сравнения в постоянное свойство себя: уже не «отстаю вот в этом», а «являюсь этим».",
+                '"A nobody" converts the outcome of a comparison into a permanent property of oneself: no longer "I\'m behind in this particular thing" but "this is what I am".',
             ),
         ),
     ),
@@ -248,8 +256,8 @@ _POSITIVE_EXAMPLES: tuple[
         (
             (
                 15,
-                "«Несправедливо» применяет личный эталон справедливости как объективное мерило мира — ситуация судится по правилу «мир обязан быть честным ко мне».",
-                '"Not fair" applies a personal standard of fairness as an objective measure of the world — the situation is judged by the rule "the world owes me fairness".',
+                "Решение меряется одной меркой — кто больше работал, — как будто она единственная и общая для всех; по каким критериям решали на самом деле, в мысли не сказано.",
+                'The decision is measured by a single yardstick — who worked hardest — as though it were the only one and shared by everyone; what criteria were actually used is not stated anywhere in the thought.',
             ),
         ),
     ),
@@ -259,8 +267,8 @@ _POSITIVE_EXAMPLES: tuple[
         (
             (
                 16,
-                "«Ничего не зависит, всё решают другие» — позиция полной внешней управляемости, отрицающая собственное влияние.",
-                '"Nothing depends on me, others decide everything" is a stance of total external control that denies any influence of one\'s own.',
+                "«Ничего не зависит» — вывод обо всём сразу; ни одного конкретного места, где выбор всё-таки оставался, мысль не рассматривает.",
+                '"Nothing depends on me" is a verdict on everything at once; the thought examines not one specific place where a choice did in fact remain.',
             ),
         ),
     ),
@@ -270,8 +278,8 @@ _POSITIVE_EXAMPLES: tuple[
         (
             (
                 17,
-                "«Только из-за них», «они во всём виноваты» — ответственность за своё состояние целиком вынесена на других.",
-                '"Only because of them", "all their fault" — responsibility for one\'s own state is placed entirely on others.',
+                "Слово «только» закрывает вопрос: всё, что человек делал или мог сделать сам, вынесено за скобки, и причина остаётся ровно одна.",
+                'The word "only" closes the question: everything the person did or could have done is set aside, and exactly one cause is left standing.',
             ),
         ),
     ),
@@ -330,7 +338,11 @@ Rules:
   - a preference or taste ("I like coffee");
   - gibberish or test input ("asdf", "test test").
   Key separator: a distortion lives in an appraisal, not in a fact or an emotion. "I didn't eat" → empty; "I didn't eat because I'm a worthless nobody who doesn't deserve care" → has a distortion.
-- In the explanation, anchor to a concrete phrasing from the thought — quote it (close paraphrase is fine, an exact substring is not required) and explain why that phrasing makes the thought this distortion. Describe the cognitive operation of THIS distortion only: do not describe the resulting emotion ("...and that's why it feels unfair") and do not restate another distortion's mechanism. 1–2 sentences, plain language.
+- In the explanation, anchor to a concrete phrasing from the thought — quote it (close paraphrase is fine, an exact substring is not required). The explanation must add something the thought does not already say: name what the thought treats as evidence (a specific fact, word, or detail) and what it leaves out — what stayed unchecked, or which other explanation fits just as well.
+- Do NOT restate the distortion's definition instead of analysing the thought. "Attributing thoughts to someone without checking", "states the future as a settled fact", "a fixed label on the whole person" are names of mechanisms, not explanations: they say nothing new about this particular thought. Test yourself: delete the quote from your explanation — if what remains would fit any other thought carrying the same label, rewrite it.
+- Do not invent circumstances that are not in the input. Rely only on the thought's text and the provided A and C context.
+- Describe the cognitive operation of THIS distortion only: do not describe the resulting emotion ("...and that's why it feels unfair") and do not restate another distortion's mechanism. With several distortions, each gets its own explanation about its own part of the thought.
+- 1–2 sentences, plain language.
 - If the thought contains no distortions, return an empty distortions array
 - Reply ONLY as JSON
 - In the explanation do NOT use the words "patient", "client", or "user".
@@ -361,7 +373,11 @@ Response format:
   - предпочтение или вкус («я люблю кофе»);
   - бессмыслица или тестовый ввод («asdf», «ыыы», «test test»).
   Ключевой разделитель: искажение живёт в оценке, а не в факте или эмоции. «я не поел» → пусто; «я не поел, потому что я ничтожество, не заслуживающее заботы» → есть искажение.
-- В пояснении (explanation) опирайся на конкретную формулировку из мысли — приведи её (можно близко к тексту, дословность не требуется) и объясни, почему именно она делает мысль этим искажением. Объясняй когнитивную операцию ИМЕННО этого искажения: не описывай эмоцию-следствие («…и поэтому обидно/виновато») и не пересказывай механику другого искажения. 1–2 предложения, живым языком.
+- В пояснении (explanation) опирайся на конкретную формулировку из мысли — приведи её (можно близко к тексту, дословность не требуется). Пояснение обязано добавлять то, чего в самой мысли нет: назови, что мысль принимает за доказательство (конкретный факт, слово, деталь), и чего она при этом не учитывает — что осталось непроверенным или какое объяснение подходит не хуже.
+- НЕ пересказывай определение искажения вместо разбора мысли. «Приписывание чужих мыслей без проверки», «подаёт будущее как решённый факт», «фиксированный ярлык на всю личность» — это названия механизмов, а не пояснения: о конкретной мысли они не сообщают ничего нового. Проверь себя: убери из пояснения цитату — если оставшееся подойдёт к любой другой мысли с тем же искажением, перепиши.
+- Не придумывай обстоятельств, которых нет во вводе. Опирайся только на текст мысли и переданный контекст A и C.
+- Объясняй когнитивную операцию ИМЕННО этого искажения: не описывай эмоцию-следствие («…и поэтому обидно/виновато») и не пересказывай механику другого искажения. Если искажений несколько, у каждого своё пояснение про свою часть мысли.
+- 1–2 предложения, живым языком.
 - Если мысль не содержит искажений, верни пустой массив
 - Отвечай ТОЛЬКО на русском языке
 - Отвечай ТОЛЬКО в формате JSON
@@ -372,6 +388,79 @@ Response format:
 
 Формат ответа:
 {{"distortions": [{{"name": "Название из списка", "explanation": "Краткое пояснение, почему это искажение"}}]}}"""
+
+
+def build_analyze_schema(language: str = "ru") -> dict:
+    """json_schema для /analyze: имя искажения — enum по каноническому списку.
+
+    Зачем: без схемы имя держится только просьбой в промпте, и дрейф ловится
+    постфактум фильтром в `groq_client.analyze()` — то есть молча выбрасывается,
+    и пользователь видит «искажений не найдено» вместо сбоя. С enum чужое имя
+    вернуть просто нельзя. Особенно важно при смене модели: дрейф появляется
+    именно там.
+
+    ВНИМАНИЕ, переносимость: набор ключей JSON Schema у провайдеров разный.
+    `maxItems` здесь нет намеренно — Anthropic отклоняет его четырёхсоткой
+    («For 'array' type, property 'maxItems' is not supported»), а OpenAI
+    принимает. Всё, что тут остаётся, проверено на обоих. Лимит в 3 искажения
+    держат промпт и срез `raw[:3]` в клиенте, схема за него не отвечает.
+    """
+    names = DISTORTIONS_EN if language == "en" else DISTORTIONS
+    return {
+        "name": "distortions",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["distortions"],
+            "properties": {
+                "distortions": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["name", "explanation"],
+                        "properties": {
+                            "name": {"type": "string", "enum": list(names)},
+                            "explanation": {"type": "string"},
+                        },
+                    },
+                }
+            },
+        },
+    }
+
+
+def build_beliefs_schema() -> dict:
+    """json_schema для /beliefs: area — enum по BELIEF_AREAS.
+
+    Те же ограничения переносимости, что и у `build_analyze_schema`.
+    """
+    return {
+        "name": "beliefs",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["beliefs", "summary"],
+            "properties": {
+                "beliefs": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["belief", "area", "evidence"],
+                        "properties": {
+                            "belief": {"type": "string"},
+                            "area": {"type": "string", "enum": list(BELIEF_AREAS)},
+                            "evidence": {"type": "array", "items": {"type": "string"}},
+                        },
+                    },
+                },
+                "summary": {"type": "string"},
+            },
+        },
+    }
 
 
 def build_user_prompt(
@@ -499,6 +588,111 @@ Response format:
 
 Формат ответа:
 {"review": "текст обзора"}"""
+
+
+# ── Глубинные убеждения (синтез по сохранённым разборам) ──
+#
+# Слой под автоматическими мыслями: общие безусловные представления, из
+# которых мысли вырастают. Клиент открывает это по кнопке в «Сохранено» и
+# только когда записей достаточно (>= 10) — на трёх записях паттерна нет, а
+# натянутая гипотеза о себе вредна. Тот же гейт продублирован в схеме.
+#
+# Области — ключи, не локализованные названия (как THEME_KEYS): клиент
+# рендерит их сам.
+
+BELIEF_AREAS: tuple[str, ...] = ("self", "others", "world")
+
+_AREA_DESCRIPTIONS_RU: dict[str, str] = {
+    "self": "о себе — какой я",
+    "others": "о других людях — чего от них ждать",
+    "world": "о мире и жизни в целом — как всё устроено",
+}
+
+_AREA_DESCRIPTIONS_EN: dict[str, str] = {
+    "self": "about yourself — what you are like",
+    "others": "about other people — what to expect from them",
+    "world": "about the world and life in general — how things work",
+}
+
+
+def _area_listing(language: str) -> str:
+    desc = _AREA_DESCRIPTIONS_EN if language == "en" else _AREA_DESCRIPTIONS_RU
+    return "\n".join(f"- {k}: {desc[k]}" for k in BELIEF_AREAS)
+
+
+def build_beliefs_system_prompt(language: str = "ru") -> str:
+    areas = _area_listing(language)
+    if language == "en":
+        return f"""You help someone with their CBT practice. You are given their saved automatic-thought analyses from some period of time. Your task: suggest which core beliefs might sit underneath those thoughts.
+
+What a core belief is: a general, unconditional idea about oneself, about other people, or about the world — usually never said out loud, but the soil the specific automatic thoughts grow from. "They'll tear my work apart in the meeting" and "he thought I was an idiot" can both grow from one "something is wrong with me, and it shows".
+
+Three areas (in the "area" field use ONLY these keys):
+{areas}
+
+Rules:
+- Offer 1 to 3 beliefs. Fewer is better than forced.
+- Word each belief in the first person, as a short phrase, in the person's own vocabulary where possible — the way they might say it if they said it out loud.
+- Ground every belief in "evidence": 2 to 4 quotes from their own entries, verbatim. Never invent a quote — use only what is in the input.
+- Keep each quote short — 15 words at most. If the fragment runs longer, take its core and mark the omission with an ellipsis, leaving the wording untouched.
+- These are hypotheses, not a diagnosis. Keep the tentative mood in the wording and in the summary: "it sounds like", "this comes up often", "maybe". Never "you have the belief that", "your problem is".
+- Do NOT: diagnose, name disorders, recommend therapy or treatment, judge the person, praise or scold, or explain the origin through childhood and parents unless they wrote about it themselves.
+- Do not use the words "patient", "client", or "user". Address the person as "you".
+- "summary": 2–4 sentences, warm and even in tone — what recurs overall. End with one gentle question to sit with. Not advice.
+- If there are too few entries, or they are too scattered to show a repeat, return an empty beliefs array and say so honestly and warmly in the summary.
+- Reply ONLY as JSON.
+
+Response format:
+{{"beliefs": [{{"belief": "short first-person phrase", "area": "self", "evidence": ["quote", "quote"]}}], "summary": "the summary text"}}"""
+
+    return f"""Ты помогаешь человеку в практике КПТ. У тебя есть его сохранённые разборы автоматических мыслей за какое-то время. Твоя задача — предположить, какие глубинные убеждения могут стоять за этими мыслями.
+
+Что такое глубинное убеждение: это общее безусловное представление о себе, о других людях или о мире, которое человек обычно не проговаривает, но из которого вырастают конкретные автоматические мысли. «Меня разнесут на встрече» и «он подумал, что я тупой» могут расти из одного «со мной что-то не так, и это заметно».
+
+Три области (в поле "area" используй ТОЛЬКО эти ключи):
+{areas}
+
+Правила:
+- Предложи от 1 до 3 убеждений. Меньше — лучше, чем натянуто.
+- Формулируй убеждение от первого лица, короткой фразой, по возможности словами самого человека — так, как он сказал бы это вслух.
+- Каждое убеждение опирай на "evidence" — от 2 до 4 цитат из его же записей, дословно. Не выдумывай цитат: бери только то, что есть во вводе.
+- Цитата короткая — до 15 слов. Если фрагмент длиннее, возьми из него самую суть и обозначь пропуск многоточием, не меняя формулировок.
+- Это гипотезы, а не диагноз. Держи предположительную модальность и в формулировках, и в summary: «похоже», «часто звучит», «может быть». Никаких «у тебя убеждение», «твоя проблема в том, что».
+- НЕЛЬЗЯ: ставить диагнозы, называть расстройства, советовать терапию или лечение, оценивать человека, хвалить или ругать, объяснять происхождение через детство и родителей, если человек сам об этом не писал.
+- Не используй слова «пациент», «клиент», «пользователь». Обращайся на «ты».
+- "summary": 2–4 предложения тёплым ровным тоном — что повторяется в целом. Закончи одним мягким вопросом, с которым можно побыть. Не советом.
+- Если записей мало или они слишком разные, чтобы увидеть повтор, — верни пустой массив beliefs и честно, тепло скажи об этом в summary.
+- Отвечай ТОЛЬКО на русском языке и ТОЛЬКО в формате JSON.
+
+Формат ответа:
+{{"beliefs": [{{"belief": "короткая фраза от первого лица", "area": "self", "evidence": ["цитата", "цитата"]}}], "summary": "текст обзора"}}"""
+
+
+def build_beliefs_user_prompt(
+    entries: list[tuple[str, str, str, list[str], list[str]]],
+    language: str = "ru",
+) -> str:
+    """entries: (date, situation, emotions, thoughts, distortions) — validated upstream."""
+    if language == "en":
+        header = "Saved analyses (oldest first):"
+        labels = ("situation", "emotions", "thoughts", "distortions found")
+    else:
+        header = "Сохранённые разборы (от старых к новым):"
+        labels = ("ситуация", "эмоции", "мысли", "найденные искажения")
+
+    lines = [header]
+    for date, situation, emotions, thoughts, distortions in entries:
+        lines.append(f"\n[{date}]")
+        if situation.strip():
+            lines.append(f"  {labels[0]}: {situation.strip()}")
+        if emotions.strip():
+            lines.append(f"  {labels[1]}: {emotions.strip()}")
+        for t in thoughts:
+            if t.strip():
+                lines.append(f'  {labels[2]}: "{t.strip()}"')
+        if distortions:
+            lines.append(f"  {labels[3]}: {', '.join(distortions)}")
+    return "\n".join(lines)
 
 
 def build_review_user_prompt(

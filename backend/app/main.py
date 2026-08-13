@@ -19,6 +19,8 @@ from app.rate_limit import InMemoryRateLimiter
 from app.schemas import (
     AnalyzeRequest,
     AnalyzeResponse,
+    BeliefsRequest,
+    BeliefsResponse,
     ReviewRequest,
     ReviewResponse,
     SuggestRequest,
@@ -107,6 +109,15 @@ async def review(
     _: str = Depends(rate_limit),
 ) -> ReviewResponse:
     return await groq.review(body)
+
+
+@app.post("/beliefs", response_model=BeliefsResponse)
+async def beliefs(
+    body: BeliefsRequest,
+    groq: GroqClient = Depends(get_groq),
+    _: str = Depends(rate_limit),
+) -> BeliefsResponse:
+    return await groq.beliefs(body)
 
 
 @app.post("/transcribe", response_model=TranscribeResponse)

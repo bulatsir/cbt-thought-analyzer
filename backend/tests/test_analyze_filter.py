@@ -1,6 +1,6 @@
 import pytest
 
-from app.groq_client import GroqClient
+from app.groq_client import GroqClient, _Reply
 from app.schemas import AnalyzeRequest
 
 
@@ -9,8 +9,8 @@ def client(monkeypatch):
     gc = GroqClient(api_key="test-key")
 
     def set_reply(parsed: dict):
-        async def fake_call(system_prompt, user_prompt, max_tokens=512):
-            return parsed
+        async def fake_call(system_prompt, user_prompt, max_tokens=512, schema=None, model=None):
+            return _Reply(parsed, "test/model")
         monkeypatch.setattr(gc, "_call", fake_call)
 
     gc.set_reply = set_reply  # type: ignore[attr-defined]

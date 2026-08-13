@@ -33,7 +33,7 @@ async def test_happy_path_returns_parsed_content(monkeypatch, gc):
     inner = {"distortions": [{"name": "Катастрофизация", "explanation": "x"}]}
     body = {"choices": [{"message": {"content": json.dumps(inner)}}]}
     patch_post(monkeypatch, gc, FakeResponse(200, body))
-    assert await gc._call("sys", "usr") == inner
+    assert (await gc._call("sys", "usr")).data == inner
 
 
 async def test_error_object_with_http_200_is_treated_as_failure(monkeypatch, gc):
@@ -91,3 +91,74 @@ async def test_empty_choices_maps_to_502(monkeypatch, gc):
     with pytest.raises(HTTPException) as e:
         await gc._call("sys", "usr")
     assert e.value.status_code == 502
+
+
+# ── retry on an unusable (but not failed) reply ──
+#
+# Measured against the live backend: the same input could return valid JSON on
+# four attempts and garbage on the fifth. That is a flaky sample, not a refusal,
+# so one resample absorbs it instead of surfacing a 502 to someone mid-thought.
+
+
+def patch_post_sequence(monkeypatch, gc: GroqClient, responses: list[FakeResponse]):
+    """Serve `responses` in order; records how many posts were made."""
+    calls = {"n": 0}
+
+    async def fake_post(url, json=None):  # noqa: A002 - mirror httpx signature
+        response = responses[min(calls["n"], len(responses) - 1)]
+        calls["n"] += 1
+        return response
+
+    monkeypatch.setattr(gc._client, "post", fake_post)
+    return calls
+
+
+async def test_garbled_content_is_retried_and_succeeds(monkeypatch, gc):
+    inner = {"distortions": []}
+    calls = patch_post_sequence(
+        monkeypatch,
+        gc,
+        [
+            # Truncated mid-string, exactly how a cut-off reply arrives.
+            FakeResponse(200, {"choices": [{"message": {"content": '{"distortions": [{"na'}}]}),
+            FakeResponse(200, {"choices": [{"message": {"content": json.dumps(inner)}}]}),
+        ],
+    )
+    assert (await gc._call("sys", "usr")).data == inner
+    assert calls["n"] == 2
+
+
+async def test_empty_content_is_retried_and_succeeds(monkeypatch, gc):
+    inner = {"beliefs": [], "summary": "мало записей"}
+    calls = patch_post_sequence(
+        monkeypatch,
+        gc,
+        [
+            FakeResponse(200, {"choices": [{"message": {"content": ""}}]}),
+            FakeResponse(200, {"choices": [{"message": {"content": json.dumps(inner)}}]}),
+        ],
+    )
+    assert (await gc._call("sys", "usr")).data == inner
+    assert calls["n"] == 2
+
+
+async def test_unusable_twice_gives_up_with_502(monkeypatch, gc):
+    calls = patch_post_sequence(
+        monkeypatch, gc, [FakeResponse(200, {"choices": [{"message": {"content": "nope"}}]})]
+    )
+    with pytest.raises(HTTPException) as e:
+        await gc._call("sys", "usr")
+    assert e.value.status_code == 502
+    # Exactly two attempts — a third would cost the waiting person real seconds.
+    assert calls["n"] == 2
+
+
+async def test_hard_upstream_failure_is_not_retried(monkeypatch, gc):
+    # A 429 is a refusal, not a flaky sample: resampling it just burns time.
+    calls = patch_post_sequence(
+        monkeypatch, gc, [FakeResponse(429, {"error": {"code": 429, "message": "slow down"}})]
+    )
+    with pytest.raises(HTTPException) as e:
+        await gc._call("sys", "usr")
+    assert e.value.status_code == 429
+    assert calls["n"] == 1

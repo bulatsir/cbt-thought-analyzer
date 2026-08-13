@@ -1,15 +1,20 @@
 import json
 import logging
 import os
-from typing import Any
+from typing import Any, NamedTuple
 
 import httpx
 from fastapi import HTTPException
 
 from app.prompts import (
+    BELIEF_AREAS,
+    build_analyze_schema,
+    build_beliefs_schema,
     DISTORTIONS,
     DISTORTIONS_EN,
     THEME_KEYS,
+    build_beliefs_system_prompt,
+    build_beliefs_user_prompt,
     build_review_system_prompt,
     build_review_user_prompt,
     build_suggest_system_prompt,
@@ -20,6 +25,9 @@ from app.prompts import (
 from app.schemas import (
     AnalyzeRequest,
     AnalyzeResponse,
+    BeliefsRequest,
+    BeliefsResponse,
+    CoreBelief,
     Distortion,
     ReviewRequest,
     ReviewResponse,
@@ -35,7 +43,29 @@ _CANONICAL_NAMES_BY_LANG: dict[str, set[str]] = {
 logger = logging.getLogger(__name__)
 
 UPSTREAM_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL = "anthropic/claude-sonnet-4.6"
+# Sonnet 5 since 2026-08-09 (was Sonnet 4.6). Cheaper than 4.6 on OpenRouter
+# right now — $2/$10 per MTok intro through 2026-08-31, $3/$15 after, i.e. never
+# worse than what 4.6 cost. Opus 5 ($5/$25) was considered and rejected: the
+# real /analyze failure is explanation *style*, not label accuracy (85% of user
+# verdicts are 👍, and 13 of 15 👎 say "weak explanation", only 1 "wrong label"),
+# so it is a prompting problem a bigger model does not fix. Opus 5 also runs
+# adaptive thinking by default, which shares max_tokens with the answer and
+# would blow the reactive 1.5s-debounce UX on the client.
+MODEL = "anthropic/claude-sonnet-5"
+
+# Клиент может выбрать модель, но только из этого списка: строку из запроса в
+# апстрим пускать нельзя — это чужие деньги и чужие модели. Все проверены на
+# нашей задаче: держат канонические имена, слушаются json_schema, отвечают
+# по-русски. Замеры 2026-08-12 на 12 реальных мыслях (100 вызовов):
+#   sonnet-5      10.0s  127¢   — качество эталонное
+#   luna           4.7s    5¢   — вдвое быстрее, в 24 раза дешевле
+#   luna-pro      11.6s   16¢   — медленнее и дороже luna без выигрыша
+ALLOWED_MODELS: tuple[str, ...] = (
+    "anthropic/claude-sonnet-5",
+    "openai/gpt-5.6-luna",
+    "openai/gpt-5.6-luna-pro",
+)
+
 TIMEOUT_SECONDS = 30.0
 
 # Speech-to-text (voice-to-text). OpenAI gpt-4o-transcribe: best Russian
@@ -94,6 +124,42 @@ def _raise_for_upstream(status: int, data: Any, text: str) -> None:
     raise HTTPException(status_code=502, detail="Upstream error")
 
 
+def _resolve_model(requested: str | None) -> str:
+    """Модель из запроса, если она в белом списке; иначе дефолтная.
+
+    Неизвестную не отклоняем четырёхсоткой намеренно: клиент может быть старее
+    или новее бэка, и разбор мысли важнее, чем точность выбора модели — лучше
+    ответить дефолтной и оставить след в логах, чем показать человеку ошибку.
+    """
+    if requested is None:
+        return MODEL
+    if requested in ALLOWED_MODELS:
+        return requested
+    logger.warning("Requested model %r not allowed, falling back to %s", requested, MODEL)
+    return MODEL
+
+
+class _Reply(NamedTuple):
+    """Разобранный ответ + модель, которая его фактически выдала."""
+
+    data: dict[str, Any]
+    model: str
+
+
+class _Unusable(Exception):
+    """Апстрим ответил, но ответ непригоден: пустой content или не-JSON.
+
+    Отличается от ошибок в `_raise_for_upstream` тем, что это плавающий сбой,
+    а не отказ: один и тот же ввод на повторе обычно проходит (замеряли — на
+    некоторых мыслях примерно 1 из 5 падал, остальные 4 отвечали нормально).
+    Поэтому такой сбой ретраится внутри `_call`, а не летит наружу как 502.
+    """
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+
+
 class GroqClient:
     def __init__(self, api_key: str) -> None:
         self._api_key = api_key
@@ -116,17 +182,54 @@ class GroqClient:
         system_prompt: str,
         user_prompt: str,
         max_tokens: int = 512,
-    ) -> dict[str, Any]:
+        schema: dict | None = None,
+        model: str | None = None,
+    ) -> "_Reply":
+        """Один осмысленный ответ от апстрима, с повтором на непригодный.
+
+        temperature=0.3, так что повтор — это новая выборка, а не тот же ответ
+        ещё раз. Два захода выбраны сознательно: сбой независимый и редкий, так
+        что второй заход закрывает подавляющую часть, а третий уже заметно бьёт
+        по времени ответа там, где пользователь ждёт вживую.
+        """
+        for attempt in range(2):
+            try:
+                return await self._call_once(
+                    system_prompt, user_prompt, max_tokens, schema, model
+                )
+            except _Unusable as unusable:
+                if attempt == 0:
+                    logger.info("Retrying after unusable upstream reply: %s", unusable.detail)
+                    continue
+                logger.error("Upstream unusable twice: %s", unusable.detail)
+                raise HTTPException(status_code=502, detail=unusable.detail)
+        raise AssertionError("unreachable")
+
+    async def _call_once(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int = 512,
+        schema: dict | None = None,
+        model: str | None = None,
+    ) -> "_Reply":
+        # json_schema, когда схема есть: провайдер сам не даст вернуть имя вне
+        # enum. Без схемы — json_object: гарантирует валидный JSON, но не форму.
+        response_format: dict[str, Any] = (
+            {"type": "json_schema", "json_schema": schema}
+            if schema
+            else {"type": "json_object"}
+        )
         try:
             response = await self._client.post(
                 UPSTREAM_URL,
                 json={
-                    "model": MODEL,
+                    "model": model or MODEL,
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
-                    "response_format": {"type": "json_object"},
+                    "response_format": response_format,
                     "temperature": 0.3,
                     "max_tokens": max_tokens,
                 },
@@ -149,27 +252,53 @@ class GroqClient:
 
         if not isinstance(data, dict):
             logger.warning("Non-JSON from upstream: %s", response.text[:200])
-            raise HTTPException(status_code=502, detail="Invalid response from upstream")
+            raise _Unusable("Invalid response from upstream")
 
         choices = data.get("choices") or []
-        content = (
-            choices[0].get("message", {}).get("content") if choices else None
-        )
+        message = choices[0].get("message", {}) if choices else {}
+        content = message.get("content")
+        finish = choices[0].get("finish_reason") if choices else None
         if not content:
-            logger.warning("Empty content from upstream: %s", str(data)[:200])
-            raise HTTPException(status_code=502, detail="Empty response from upstream")
+            logger.warning(
+                "Empty content from upstream (finish_reason=%s): %s",
+                finish,
+                str(data)[:200],
+            )
+            raise _Unusable("Empty response from upstream")
 
         try:
-            return json.loads(_strip_fences(content))
+            # `model` в ответе — кто РЕАЛЬНО отвечал: OpenRouter может увести
+            # запрос на другого провайдера, и в метаданные клиента должно уехать
+            # то, что было на самом деле, а не то, что мы просили.
+            return _Reply(json.loads(_strip_fences(content)), data.get("model") or model or MODEL)
         except json.JSONDecodeError:
-            logger.warning("Non-JSON from upstream: %s", content[:200])
-            raise HTTPException(status_code=502, detail="Invalid JSON from upstream")
+            # Логируем длину и finish_reason: по одному обрезанному до 200
+            # символов куску не отличить «обрыв по max_tokens» (finish_reason
+            # == "length") от «модель вернула мусор» — на этом я один раз уже
+            # поставил неверный диагноз.
+            logger.warning(
+                "Non-JSON from upstream (len=%d, finish_reason=%s): %s",
+                len(content),
+                finish,
+                content[:200],
+            )
+            raise _Unusable("Invalid JSON from upstream")
 
     async def analyze(self, req: AnalyzeRequest) -> AnalyzeResponse:
-        parsed = await self._call(
+        reply = await self._call(
             build_system_prompt(req.language),
             build_user_prompt(req.thought, req.situation, req.emotions),
+            schema=build_analyze_schema(req.language),
+            model=_resolve_model(req.model),
+            # 2048, не 512: пояснения v2 называют, на чём мысль стоит и чего в ней
+            # не хватает, и вышли заметно длиннее прежних однострочников. Три таких
+            # по-русски (~150 токенов каждое) упирались ровно в 512 — JSON обрывался
+            # на середине строки, json.loads падал, наружу шёл 502. Клиент ретраит
+            # 5xx трижды, поэтому одна длинная мысль стоила трёх обрезанных вызовов.
+            # max_tokens — потолок, а не счёт: типичный ответ прежний, платим столько же.
+            max_tokens=2048,
         )
+        parsed = reply.data
         raw = parsed.get("distortions", [])
         if not isinstance(raw, list):
             raw = []
@@ -199,14 +328,14 @@ class GroqClient:
                 req.language,
                 dropped,
             )
-        return AnalyzeResponse(distortions=distortions)
+        return AnalyzeResponse(distortions=distortions, model=reply.model)
 
     async def suggest(self, req: SuggestRequest) -> SuggestResponse:
-        parsed = await self._call(
+        parsed = (await self._call(
             build_suggest_system_prompt(req.voice_names, req.language),
             build_suggest_user_prompt(req.text),
             max_tokens=256,
-        )
+        )).data
 
         # Hard-filter: voice must come from the request's roster, themes from
         # the canonical key list — same contract pattern as /analyze.
@@ -229,19 +358,78 @@ class GroqClient:
         return SuggestResponse(voice_name=voice_name, themes=themes)
 
     async def review(self, req: ReviewRequest) -> ReviewResponse:
-        parsed = await self._call(
+        parsed = (await self._call(
             build_review_system_prompt(req.language),
             build_review_user_prompt(
                 [(m.text, m.voices, m.themes, m.date) for m in req.moments],
                 req.language,
             ),
             max_tokens=1024,
-        )
+        )).data
         review = parsed.get("review")
         if not isinstance(review, str) or not review.strip():
             logger.warning("review returned empty/invalid text: %s", str(parsed)[:200])
             raise HTTPException(status_code=502, detail="Empty review from upstream")
         return ReviewResponse(review=review.strip())
+
+    async def beliefs(self, req: BeliefsRequest) -> BeliefsResponse:
+        reply = await self._call(
+            build_beliefs_system_prompt(req.language),
+            build_beliefs_user_prompt(
+                [
+                    (e.date, e.situation, e.emotions, e.thoughts, e.distortions)
+                    for e in req.entries
+                ],
+                req.language,
+            ),
+            # 4096, не 1536: цитаты берутся дословно из записей, и на корпусе
+            # от ~25 записей ответ обрывался на середине JSON-строки → json.loads
+            # падал → наш же 502 «Non-JSON from upstream». Промпт дополнительно
+            # ограничивает длину цитат, но потолок должен иметь запас.
+            max_tokens=4096,
+            schema=build_beliefs_schema(),
+        )
+        parsed = reply.data
+
+        raw = parsed.get("beliefs", [])
+        if not isinstance(raw, list):
+            raw = []
+        beliefs: list[CoreBelief] = []
+        for item in raw[:3]:
+            if not isinstance(item, dict):
+                continue
+            text = item.get("belief")
+            if not isinstance(text, str) or not text.strip():
+                continue
+            # Hard-filter: area must be a canonical key — same contract pattern
+            # as /analyze names and /suggest themes.
+            area = item.get("area")
+            if not isinstance(area, str) or area not in BELIEF_AREAS:
+                logger.warning("beliefs dropped non-canonical area: %r", area)
+                continue
+            raw_evidence = item.get("evidence", [])
+            if not isinstance(raw_evidence, list):
+                raw_evidence = []
+            evidence = [
+                q.strip()
+                for q in raw_evidence[:4]
+                if isinstance(q, str) and q.strip()
+            ]
+            beliefs.append(
+                CoreBelief(belief=text.strip(), area=area, evidence=evidence)
+            )
+
+        summary = parsed.get("summary")
+        if not isinstance(summary, str):
+            summary = ""
+        summary = summary.strip()
+        # An empty beliefs list is a valid, honest answer ("too few entries to
+        # see a pattern") — but only when the summary explains it. Both empty
+        # means the model returned nothing usable.
+        if not beliefs and not summary:
+            logger.warning("beliefs returned nothing usable: %s", str(parsed)[:200])
+            raise HTTPException(status_code=502, detail="Empty beliefs from upstream")
+        return BeliefsResponse(beliefs=beliefs, summary=summary)
 
     async def transcribe(
         self,
